@@ -145,6 +145,46 @@
     </div>
 </div>
 
+<!-- Modal sửa chi phí -->
+<div class="modal fade" id="editExpenseModal">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Sửa Chi Phí</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="editExpenseForm">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Mô tả chi phí</label>
+                        <input type="text" class="form-control" id="editExpenseDescription" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Số tiền (VND)</label>
+                        <input type="number" class="form-control" id="editExpenseAmount" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Người thanh toán</label>
+                        <select class="form-select" id="editExpensePayer" required>
+                            <option value="">Chọn người thanh toán...</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Người tham gia</label>
+                        <div id="editExpenseParticipants">
+                            <!-- Danh sách checkbox sẽ được load bằng JavaScript -->
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                    <button type="submit" class="btn btn-primary">Lưu</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Modal cấu hình ngân hàng -->
 <div class="modal fade" id="bankConfigModal">
     <div class="modal-dialog modal-lg">
@@ -172,6 +212,7 @@
     const eventId = '{{ event.event_id }}';
     let members = [];
     let expenses = [];
+    let editingExpenseId = null;
 
     $(document).ready(function () {
         loadMembers();
@@ -181,9 +222,22 @@
     function loadMembers() {
         $.get(`/api/event/${eventId}/members`, function (data) {
             members = data.members;
-            displayMembers();
-            updateExpenseSelectors();
+            // Lấy lại expenses để kiểm tra thành viên có tham gia chi phí không
+            $.get(`/api/event/${eventId}/expenses`, function (expData) {
+                expenses = expData.expenses;
+                displayMembers();
+                updateExpenseSelectors();
+            });
         });
+    }
+
+    function memberCanBeDeleted(memberId) {
+        // Kiểm tra nếu memberId không phải là payer hoặc participant trong bất kỳ expense nào
+        for (let expense of expenses) {
+            if (expense.payer_id === memberId) return false;
+            if (expense.participant_ids && expense.participant_ids.includes(memberId)) return false;
+        }
+        return true;
     }
 
     function displayMembers() {
@@ -199,12 +253,35 @@
             const memberItem = $(`
             <div class="d-flex justify-content-between align-items-center mb-2 p-2 bg-light rounded">
                 <span>${member.name}</span>
-                <small class="text-muted">
-                    ${member.bank_name || 'Chưa cấu hình ngân hàng'}
-                </small>
+                <div>
+                    <small class="text-muted me-2">
+                        ${member.bank_name || 'Chưa cấu hình ngân hàng'}
+                    </small>
+                    ${member.can_delete ? `<button class='btn btn-danger btn-sm' onclick='deleteMember("${member.id}")'>Xóa</button>` : ''}
+                </div>
             </div>
         `);
             membersList.append(memberItem);
+        });
+    }
+
+    function deleteMember(memberId) {
+        if (!confirm('Bạn có chắc muốn xóa thành viên này?')) return;
+        $.ajax({
+            url: `/api/event/${eventId}/members/${memberId}`,
+            method: 'DELETE',
+            success: function (response) {
+                if (response.success) {
+                    loadMembers();
+                    loadExpenses();
+                    calculateExpenses();
+                } else {
+                    alert(response.message || 'Không thể xóa thành viên.');
+                }
+            },
+            error: function () {
+                alert('Có lỗi xảy ra khi xóa thành viên');
+            }
         });
     }
 
@@ -212,6 +289,7 @@
         $.get(`/api/event/${eventId}/expenses`, function (data) {
             expenses = data.expenses;
             displayExpenses();
+            calculateExpenses(false); // Tự động tính toán lại khi load xong chi phí, không hiện alert nếu chưa có chi phí
         });
     }
 
@@ -239,12 +317,34 @@
                         </div>
                     </div>
                     <div class="text-end">
-                        <strong>${expense.amount.toLocaleString()} VND</strong>
+                        <strong>${expense.amount.toLocaleString()} VND</strong><br>
+                        <button class='btn btn-warning btn-sm mt-2' onclick='showEditExpenseModal("${expense.id}")'>Sửa</button>
+                        <button class='btn btn-danger btn-sm mt-2' onclick='deleteExpense("${expense.id}")'>Xóa</button>
                     </div>
                 </div>
             </div>
         `);
             expensesList.append(expenseItem);
+        });
+    }
+
+    function deleteExpense(expenseId) {
+        if (!confirm('Bạn có chắc muốn xóa chi phí này?')) return;
+        $.ajax({
+            url: `/api/event/${eventId}/expenses/${expenseId}`,
+            method: 'DELETE',
+            success: function (response) {
+                if (response.success) {
+                    loadExpenses();
+                    loadMembers();
+                    calculateExpenses();
+                } else {
+                    alert(response.message || 'Không thể xóa chi phí.');
+                }
+            },
+            error: function () {
+                alert('Có lỗi xảy ra khi xóa chi phí');
+            }
         });
     }
 
@@ -519,6 +619,76 @@
             },
             error: function () {
                 alert('Có lỗi xảy ra khi thêm chi phí');
+            }
+        });
+    });
+
+    function showEditExpenseModal(expenseId) {
+        // Gọi API lấy chi tiết chi phí
+        $.get(`/api/event/${eventId}/expenses/${expenseId}`, function(data) {
+            editingExpenseId = expenseId;
+            // Điền dữ liệu vào form
+            $('#editExpenseDescription').val(data.description);
+            $('#editExpenseAmount').val(data.amount);
+            // Người thanh toán
+            const payerSelect = $('#editExpensePayer');
+            payerSelect.empty().append('<option value="">Chọn người thanh toán...</option>');
+            members.forEach(member => {
+                payerSelect.append(`<option value="${member.id}">${member.name}</option>`);
+            });
+            payerSelect.val(data.payer_id || '');
+            // Người tham gia
+            const participantsDiv = $('#editExpenseParticipants');
+            participantsDiv.empty();
+            members.forEach(member => {
+                const checked = (data.participant_ids || []).includes(member.id) ? 'checked' : '';
+                participantsDiv.append(`
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" value="${member.id}" id="edit_participant_${member.id}" ${checked}>
+                        <label class="form-check-label" for="edit_participant_${member.id}">
+                            ${member.name}
+                        </label>
+                    </div>
+                `);
+            });
+            $('#editExpenseModal').modal('show');
+        });
+    }
+
+    $('#editExpenseForm').on('submit', function (e) {
+        e.preventDefault();
+        const description = $('#editExpenseDescription').val();
+        const amount = $('#editExpenseAmount').val();
+        const payerId = $('#editExpensePayer').val();
+        const participantIds = [];
+        $('#editExpenseParticipants input:checked').each(function () {
+            participantIds.push($(this).val());
+        });
+        if (participantIds.length === 0) {
+            alert('Vui lòng chọn ít nhất một người tham gia');
+            return;
+        }
+        $.ajax({
+            url: `/api/event/${eventId}/expenses/${editingExpenseId}`,
+            method: 'PUT',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                description: description,
+                amount: amount,
+                payer_id: payerId,
+                participant_ids: participantIds
+            }),
+            success: function (response) {
+                if (response.success) {
+                    $('#editExpenseModal').modal('hide');
+                    loadExpenses();
+                    calculateExpenses();
+                } else {
+                    alert(response.message || 'Không thể cập nhật chi phí.');
+                }
+            },
+            error: function () {
+                alert('Có lỗi xảy ra khi cập nhật chi phí');
             }
         });
     });

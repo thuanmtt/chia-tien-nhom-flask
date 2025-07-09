@@ -125,16 +125,22 @@ def get_members(event_id):
     try:
         event = Event.objects.get(event_id=event_id)
         members = Member.objects(event=event)
-
+        expenses = Expense.objects(event=event)
+        # Tạo set các member_id là payer hoặc participant
+        member_in_expense = set()
+        for expense in expenses:
+            member_in_expense.add(str(expense.payer.id))
+            for p in expense.participants:
+                member_in_expense.add(str(p.id))
         members_data = []
         for member in members:
             members_data.append({
                 'id': str(member.id),
                 'name': member.name,
                 'bank_name': member.bank_name or '',
-                'bank_account': member.bank_account or ''
+                'bank_account': member.bank_account or '',
+                'can_delete': str(member.id) not in member_in_expense
             })
-
         return jsonify({'members': members_data})
     except Event.DoesNotExist:
         return jsonify({'error': 'Event not found'}), 404
@@ -211,6 +217,53 @@ def add_expense(event_id):
         return jsonify({'success': True})
     except (Event.DoesNotExist, Member.DoesNotExist):
         return jsonify({'error': 'Event or member not found'}), 404
+
+
+@app.route('/api/event/<event_id>/expenses/<expense_id>', methods=['DELETE'])
+def delete_expense(event_id, expense_id):
+    try:
+        event = Event.objects.get(event_id=event_id)
+        expense = Expense.objects.get(id=expense_id, event=event)
+        expense.delete()
+        return jsonify({'success': True})
+    except (Event.DoesNotExist, Expense.DoesNotExist):
+        return jsonify({'success': False, 'message': 'Không tìm thấy sự kiện hoặc chi phí.'}), 404
+
+@app.route('/api/event/<event_id>/expenses/<expense_id>', methods=['PUT'])
+def edit_expense(event_id, expense_id):
+    try:
+        event = Event.objects.get(event_id=event_id)
+        expense = Expense.objects.get(id=expense_id, event=event)
+        data = request.get_json()
+        # Cập nhật thông tin chi phí
+        expense.description = data.get('description', expense.description)
+        expense.amount = float(data.get('amount', expense.amount))
+        if 'payer_id' in data:
+            payer = Member.objects.get(id=data['payer_id'])
+            expense.payer = payer
+        if 'participant_ids' in data:
+            participants = Member.objects(id__in=data['participant_ids'])
+            expense.participants = participants
+        expense.save()
+        return jsonify({'success': True})
+    except (Event.DoesNotExist, Expense.DoesNotExist, Member.DoesNotExist):
+        return jsonify({'success': False, 'message': 'Không tìm thấy sự kiện, chi phí hoặc thành viên.'}), 404
+
+
+@app.route('/api/event/<event_id>/expenses/<expense_id>', methods=['GET'])
+def get_expense_detail(event_id, expense_id):
+    try:
+        event = Event.objects.get(event_id=event_id)
+        expense = Expense.objects.get(id=expense_id, event=event)
+        return jsonify({
+            'id': str(expense.id),
+            'description': expense.description,
+            'amount': expense.amount,
+            'payer_id': str(expense.payer.id),
+            'participant_ids': [str(m.id) for m in expense.participants]
+        })
+    except (Event.DoesNotExist, Expense.DoesNotExist):
+        return jsonify({'error': 'Không tìm thấy sự kiện hoặc chi phí.'}), 404
 
 
 @app.route('/api/event/<event_id>/calculate', methods=['GET'])
@@ -299,6 +352,22 @@ def update_member_bank(event_id):
         return jsonify({'success': True})
     except Member.DoesNotExist:
         return jsonify({'error': 'Member not found'}), 404
+
+
+@app.route('/api/event/<event_id>/members/<member_id>', methods=['DELETE'])
+def delete_member(event_id, member_id):
+    try:
+        event = Event.objects.get(event_id=event_id)
+        member = Member.objects.get(id=member_id, event=event)
+        # Kiểm tra xem thành viên có tham gia chi phí nào không
+        is_payer = Expense.objects(event=event, payer=member).first() is not None
+        is_participant = Expense.objects(event=event, participants=member).first() is not None
+        if is_payer or is_participant:
+            return jsonify({'success': False, 'message': 'Không thể xóa thành viên đang tham gia chi phí.'}), 400
+        member.delete()
+        return jsonify({'success': True})
+    except (Event.DoesNotExist, Member.DoesNotExist):
+        return jsonify({'success': False, 'message': 'Không tìm thấy sự kiện hoặc thành viên.'}), 404
 
 
 if __name__ == '__main__':
