@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="text-center mb-5">
+            <h1 class="display-4 text-primary">
+                <i class="fas fa-coins"></i>
+                Chia Tiền Nhóm
+            </h1>
+            <p class="lead text-muted">Quản lý chi phí nhóm một cách dễ dàng và minh bạch</p>
+        </div>
+
+        <div class="row">
+            <div class="col-md-6 mb-4">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-plus-circle me-2"></i>
+                            Tạo Sự Kiện Mới
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="createEventForm">
+                            <div class="mb-3">
+                                <label class="form-label">Tên sự kiện</label>
+                                <input type="text" class="form-control" id="eventName" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Mô tả (tùy chọn)</label>
+                                <textarea class="form-control" id="eventDescription" rows="3"></textarea>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Mật khẩu bảo vệ (tùy chọn)</label>
+                                <input type="password" class="form-control" id="eventPassword">
+                                <small class="form-text text-muted">Để trống nếu không muốn đặt mật khẩu</small>
+                            </div>
+                            <button type="submit" class="btn btn-primary w-100">
+                                <i class="fas fa-plus me-2"></i>
+                                Tạo Sự Kiện
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6 mb-4">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-sign-in-alt me-2"></i>
+                            Tham Gia Sự Kiện
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="joinEventForm">
+                            <div class="mb-3">
+                                <label class="form-label">Mã sự kiện</label>
+                                <input type="text" class="form-control" id="joinEventId" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Mật khẩu (nếu có)</label>
+                                <input type="password" class="form-control" id="joinEventPassword">
+                            </div>
+                            <button type="submit" class="btn btn-outline-primary w-100">
+                                <i class="fas fa-sign-in-alt me-2"></i>
+                                Tham Gia
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mt-5">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h5>Cách sử dụng</h5>
+                        <div class="row mt-3">
+                            <div class="col-md-3">
+                                <i class="fas fa-plus-circle fa-2x text-primary mb-2"></i>
+                                <p class="small">Tạo sự kiện mới</p>
+                            </div>
+                            <div class="col-md-3">
+                                <i class="fas fa-users fa-2x text-success mb-2"></i>
+                                <p class="small">Thêm thành viên</p>
+                            </div>
+                            <div class="col-md-3">
+                                <i class="fas fa-receipt fa-2x text-warning mb-2"></i>
+                                <p class="small">Thêm chi phí</p>
+                            </div>
+                            <div class="col-md-3">
+                                <i class="fas fa-calculator fa-2x text-info mb-2"></i>
+                                <p class="small">Tính toán tự động</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+$(document).ready(function() {
+    $('#createEventForm').on('submit', function(e) {
+        e.preventDefault();
+
+        const data = {
+            name: $('#eventName').val(),
+            description: $('#eventDescription').val(),
+            password: $('#eventPassword').val()
+        };
+
+        $.ajax({
+            url: '/create_event',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(data),
+            success: function(response) {
+                if (response.success) {
+                    window.location.href = response.redirect_url;
+                } else {
+                    alert('Có lỗi xảy ra: ' + response.message);
+                }
+            },
+            error: function() {
+                alert('Có lỗi xảy ra khi tạo sự kiện');
+            }
+        });
+    });
+
+    $('#joinEventForm').on('submit', function(e) {
+        e.preventDefault();
+
+        const data = {
+            event_id: $('#joinEventId').val(),
+            password: $('#joinEventPassword').val()
+        };
+
+        $.ajax({
+            url: '/join_event',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(data),
+            success: function(response) {
+                if (response.success) {
+                    window.location.href = response.redirect_url;
+                } else {
+                    alert(response.message);
+                }
+            },
+            error: function() {
+                alert('Có lỗi xảy ra khi tham gia sự kiện');
+            }
+        });
+    });
+});
+</script>
+{% endblock %}
