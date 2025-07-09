@@ -169,34 +169,34 @@
 
 {% block scripts %}
 <script>
-const eventId = '{{ event.event_id }}';
-let members = [];
-let expenses = [];
+    const eventId = '{{ event.event_id }}';
+    let members = [];
+    let expenses = [];
 
-$(document).ready(function() {
-    loadMembers();
-    loadExpenses();
-});
-
-function loadMembers() {
-    $.get(`/api/event/${eventId}/members`, function(data) {
-        members = data.members;
-        displayMembers();
-        updateExpenseSelectors();
+    $(document).ready(function () {
+        loadMembers();
+        loadExpenses();
     });
-}
 
-function displayMembers() {
-    const membersList = $('#membersList');
-    membersList.empty();
-
-    if (members.length === 0) {
-        membersList.html('<p class="text-muted">Chưa có thành viên nào</p>');
-        return;
+    function loadMembers() {
+        $.get(`/api/event/${eventId}/members`, function (data) {
+            members = data.members;
+            displayMembers();
+            updateExpenseSelectors();
+        });
     }
 
-    members.forEach(member => {
-        const memberItem = $(`
+    function displayMembers() {
+        const membersList = $('#membersList');
+        membersList.empty();
+
+        if (members.length === 0) {
+            membersList.html('<p class="text-muted">Chưa có thành viên nào</p>');
+            return;
+        }
+
+        members.forEach(member => {
+            const memberItem = $(`
             <div class="d-flex justify-content-between align-items-center mb-2 p-2 bg-light rounded">
                 <span>${member.name}</span>
                 <small class="text-muted">
@@ -204,29 +204,29 @@ function displayMembers() {
                 </small>
             </div>
         `);
-        membersList.append(memberItem);
-    });
-}
-
-function loadExpenses() {
-    $.get(`/api/event/${eventId}/expenses`, function(data) {
-        expenses = data.expenses;
-        displayExpenses();
-    });
-}
-
-function displayExpenses() {
-    const expensesList = $('#expensesList');
-    expensesList.empty();
-
-    if (expenses.length === 0) {
-        expensesList.html('<p class="text-muted">Chưa có chi phí nào</p>');
-        return;
+            membersList.append(memberItem);
+        });
     }
 
-    expenses.forEach(expense => {
-        const participantsText = expense.participants.join(', ');
-        const expenseItem = $(`
+    function loadExpenses() {
+        $.get(`/api/event/${eventId}/expenses`, function (data) {
+            expenses = data.expenses;
+            displayExpenses();
+        });
+    }
+
+    function displayExpenses() {
+        const expensesList = $('#expensesList');
+        expensesList.empty();
+
+        if (expenses.length === 0) {
+            expensesList.html('<p class="text-muted">Chưa có chi phí nào</p>');
+            return;
+        }
+
+        expenses.forEach(expense => {
+            const participantsText = expense.participants.join(', ');
+            const expenseItem = $(`
             <div class="expense-item p-3 mb-3 rounded">
                 <div class="d-flex justify-content-between align-items-start">
                     <div>
@@ -244,50 +244,50 @@ function displayExpenses() {
                 </div>
             </div>
         `);
-        expensesList.append(expenseItem);
-    });
-}
+            expensesList.append(expenseItem);
+        });
+    }
 
-function updateExpenseSelectors() {
-    const payerSelect = $('#expensePayer');
-    const participantsDiv = $('#expenseParticipants');
+    function updateExpenseSelectors() {
+        const payerSelect = $('#expensePayer');
+        const participantsDiv = $('#expenseParticipants');
 
-    payerSelect.empty().append('<option value="">Chọn người thanh toán...</option>');
-    participantsDiv.empty();
+        payerSelect.empty().append('<option value="">Chọn người thanh toán...</option>');
+        participantsDiv.empty();
 
-    members.forEach(member => {
-        payerSelect.append(`<option value="${member.id}">${member.name}</option>`);
+        members.forEach(member => {
+            payerSelect.append(`<option value="${member.id}">${member.name}</option>`);
 
-        participantsDiv.append(`
+            participantsDiv.append(`
             <div class="form-check">
-                <input class="form-check-input" type="checkbox" value="${member.id}" id="participant_${member.id}">
+                <input class="form-check-input" type="checkbox" value="${member.id}" id="participant_${member.id}" checked>
                 <label class="form-check-label" for="participant_${member.id}">
                     ${member.name}
                 </label>
             </div>
         `);
-    });
-}
-
-function showAddExpenseModal() {
-    if (members.length === 0) {
-        alert('Vui lòng thêm thành viên trước khi thêm chi phí');
-        return;
-    }
-    $('#addExpenseModal').modal('show');
-}
-
-function showBankConfigModal() {
-    if (members.length === 0) {
-        alert('Vui lòng thêm thành viên trước');
-        return;
+        });
     }
 
-    const bankConfigList = $('#bankConfigList');
-    bankConfigList.empty();
+    function showAddExpenseModal() {
+        if (members.length === 0) {
+            alert('Vui lòng thêm thành viên trước khi thêm chi phí');
+            return;
+        }
+        $('#addExpenseModal').modal('show');
+    }
 
-    members.forEach(member => {
-        const configItem = $(`
+    function showBankConfigModal() {
+        if (members.length === 0) {
+            alert('Vui lòng thêm thành viên trước');
+            return;
+        }
+
+        const bankConfigList = $('#bankConfigList');
+        bankConfigList.empty();
+
+        members.forEach(member => {
+            const configItem = $(`
             <div class="card mb-3">
                 <div class="card-body">
                     <h6 class="card-title">${member.name}</h6>
@@ -308,58 +308,60 @@ function showBankConfigModal() {
                 </div>
             </div>
         `);
-        bankConfigList.append(configItem);
-    });
+            bankConfigList.append(configItem);
+        });
 
-    $('#bankConfigModal').modal('show');
-}
-
-function updateMemberBank(memberId, button) {
-    const card = $(button).closest('.card');
-    const bankName = card.find('.bank-name').val();
-    const bankAccount = card.find('.bank-account').val();
-
-    $.ajax({
-        url: `/api/event/${eventId}/update_member_bank`,
-        method: 'POST',
-        contentType: 'application/json',
-        data: JSON.stringify({
-            member_id: memberId,
-            bank_name: bankName,
-            bank_account: bankAccount
-        }),
-        success: function(response) {
-            if (response.success) {
-                $(button).html('<i class="fas fa-check me-1"></i>Đã lưu').addClass('btn-success').removeClass('btn-primary');
-                setTimeout(() => {
-                    $(button).html('<i class="fas fa-save me-1"></i>Lưu').addClass('btn-primary').removeClass('btn-success');
-                }, 2000);
-                loadMembers();
-            }
-        },
-        error: function() {
-            alert('Có lỗi xảy ra khi cập nhật thông tin ngân hàng');
-        }
-    });
-}
-
-function calculateExpenses() {
-    if (expenses.length === 0) {
-        alert('Chưa có chi phí nào để tính toán');
-        return;
+        $('#bankConfigModal').modal('show');
     }
 
-    $.get(`/api/event/${eventId}/calculate`, function(data) {
-        displayCalculationResults(data);
-    });
-}
+    function updateMemberBank(memberId, button) {
+        const card = $(button).closest('.card');
+        const bankName = card.find('.bank-name').val();
+        const bankAccount = card.find('.bank-account').val();
 
-function displayCalculationResults(data) {
-    const resultsDiv = $('#calculationResults');
-    resultsDiv.empty();
+        $.ajax({
+            url: `/api/event/${eventId}/update_member_bank`,
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                member_id: memberId,
+                bank_name: bankName,
+                bank_account: bankAccount
+            }),
+            success: function (response) {
+                if (response.success) {
+                    $(button).html('<i class="fas fa-check me-1"></i>Đã lưu').addClass('btn-success').removeClass('btn-primary');
+                    setTimeout(() => {
+                        $(button).html('<i class="fas fa-save me-1"></i>Lưu').addClass('btn-primary').removeClass('btn-success');
+                    }, 2000);
+                    loadMembers();
+                }
+            },
+            error: function () {
+                alert('Có lỗi xảy ra khi cập nhật thông tin ngân hàng');
+            }
+        });
+    }
 
-    // Hiển thị tổng quan
-    const overviewHtml = `
+    function calculateExpenses(showErrors = true) {
+        if (expenses.length === 0) {
+            if (showErrors) {
+                alert('Chưa có chi phí nào để tính toán');
+            }
+            return;
+        }
+
+        $.get(`/api/event/${eventId}/calculate`, function (data) {
+            displayCalculationResults(data);
+        });
+    }
+
+    function displayCalculationResults(data) {
+        const resultsDiv = $('#calculationResults');
+        resultsDiv.empty();
+
+        // Hiển thị tổng quan
+        const overviewHtml = `
         <div class="row mb-4">
             <div class="col-12">
                 <h6>Tổng quan</h6>
@@ -391,11 +393,11 @@ function displayCalculationResults(data) {
         </div>
     `;
 
-    resultsDiv.append(overviewHtml);
+        resultsDiv.append(overviewHtml);
 
-    // Hiển thị các giao dịch cần thực hiện
-    if (data.settlements.length > 0) {
-        const settlementsHtml = `
+        // Hiển thị các giao dịch cần thực hiện
+        if (data.settlements.length > 0) {
+            const settlementsHtml = `
             <div class="row">
                 <div class="col-12">
                     <h6>Các giao dịch cần thực hiện</h6>
@@ -419,105 +421,106 @@ function displayCalculationResults(data) {
             </div>
         `;
 
-        resultsDiv.append(settlementsHtml);
-    } else {
-        resultsDiv.append('<div class="alert alert-success">Tất cả đã thanh toán xong!</div>');
-    }
-}
-
-function generateQR(from, to, amount) {
-    // Tìm thông tin ngân hàng của người nhận
-    const recipient = members.find(m => m.name === to);
-    if (!recipient || !recipient.bank_account) {
-        alert('Người nhận chưa cấu hình thông tin ngân hàng');
-        return;
-    }
-
-    alert(`QR Code cho giao dịch:\nTừ: ${from}\nĐến: ${to}\nSố tiền: ${amount.toLocaleString()} VND\nTài khoản: ${recipient.bank_account}\nNgân hàng: ${recipient.bank_name}`);
-}
-
-function shareEvent() {
-    const shareUrl = window.location.href;
-    const shareText = `Tham gia sự kiện "${$('h2').text()}" với mã: ${eventId}`;
-
-    if (navigator.share) {
-        navigator.share({
-            title: 'Chia tiền nhóm',
-            text: shareText,
-            url: shareUrl
-        });
-    } else {
-        const fullText = `${shareText}\nLink: ${shareUrl}`;
-        navigator.clipboard.writeText(fullText).then(() => {
-            alert('Đã copy link chia sẻ vào clipboard');
-        });
-    }
-}
-
-// Form submissions
-$('#addMemberForm').on('submit', function(e) {
-    e.preventDefault();
-
-    const memberName = $('#memberName').val();
-
-    $.ajax({
-        url: `/api/event/${eventId}/members`,
-        method: 'POST',
-        contentType: 'application/json',
-        data: JSON.stringify({
-            name: memberName
-        }),
-        success: function(response) {
-            if (response.success) {
-                $('#addMemberModal').modal('hide');
-                $('#memberName').val('');
-                loadMembers();
-            }
-        },
-        error: function() {
-            alert('Có lỗi xảy ra khi thêm thành viên');
+            resultsDiv.append(settlementsHtml);
+        } else {
+            resultsDiv.append('<div class="alert alert-success">Tất cả đã thanh toán xong!</div>');
         }
-    });
-});
-
-$('#addExpenseForm').on('submit', function(e) {
-    e.preventDefault();
-
-    const description = $('#expenseDescription').val();
-    const amount = $('#expenseAmount').val();
-    const payerId = $('#expensePayer').val();
-    const participantIds = [];
-
-    $('#expenseParticipants input:checked').each(function() {
-        participantIds.push($(this).val());
-    });
-
-    if (participantIds.length === 0) {
-        alert('Vui lòng chọn ít nhất một người tham gia');
-        return;
     }
 
-    $.ajax({
-        url: `/api/event/${eventId}/expenses`,
-        method: 'POST',
-        contentType: 'application/json',
-        data: JSON.stringify({
-            description: description,
-            amount: amount,
-            payer_id: payerId,
-            participant_ids: participantIds
-        }),
-        success: function(response) {
-            if (response.success) {
-                $('#addExpenseModal').modal('hide');
-                $('#addExpenseForm')[0].reset();
-                loadExpenses();
-            }
-        },
-        error: function() {
-            alert('Có lỗi xảy ra khi thêm chi phí');
+    function generateQR(from, to, amount) {
+        // Tìm thông tin ngân hàng của người nhận
+        const recipient = members.find(m => m.name === to);
+        if (!recipient || !recipient.bank_account) {
+            alert('Người nhận chưa cấu hình thông tin ngân hàng');
+            return;
         }
+
+        alert(`QR Code cho giao dịch:\nTừ: ${from}\nĐến: ${to}\nSố tiền: ${amount.toLocaleString()} VND\nTài khoản: ${recipient.bank_account}\nNgân hàng: ${recipient.bank_name}`);
+    }
+
+    function shareEvent() {
+        const shareUrl = window.location.href;
+        const shareText = `Tham gia sự kiện "${$('h2').text()}" với mã: ${eventId}`;
+
+        if (navigator.share) {
+            navigator.share({
+                title: 'Chia tiền nhóm',
+                text: shareText,
+                url: shareUrl
+            });
+        } else {
+            const fullText = `${shareText}\nLink: ${shareUrl}`;
+            navigator.clipboard.writeText(fullText).then(() => {
+                alert('Đã copy link chia sẻ vào clipboard');
+            });
+        }
+    }
+
+    // Form submissions
+    $('#addMemberForm').on('submit', function (e) {
+        e.preventDefault();
+
+        const memberName = $('#memberName').val();
+
+        $.ajax({
+            url: `/api/event/${eventId}/members`,
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                name: memberName
+            }),
+            success: function (response) {
+                if (response.success) {
+                    $('#addMemberModal').modal('hide');
+                    $('#memberName').val('');
+                    loadMembers();
+                }
+            },
+            error: function () {
+                alert('Có lỗi xảy ra khi thêm thành viên');
+            }
+        });
     });
-});
+
+    $('#addExpenseForm').on('submit', function (e) {
+        e.preventDefault();
+
+        const description = $('#expenseDescription').val();
+        const amount = $('#expenseAmount').val();
+        const payerId = $('#expensePayer').val();
+        const participantIds = [];
+
+        $('#expenseParticipants input:checked').each(function () {
+            participantIds.push($(this).val());
+        });
+
+        if (participantIds.length === 0) {
+            alert('Vui lòng chọn ít nhất một người tham gia');
+            return;
+        }
+
+        $.ajax({
+            url: `/api/event/${eventId}/expenses`,
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                description: description,
+                amount: amount,
+                payer_id: payerId,
+                participant_ids: participantIds
+            }),
+            success: function (response) {
+                if (response.success) {
+                    $('#addExpenseModal').modal('hide');
+                    $('#addExpenseForm')[0].reset();
+                    loadExpenses();
+                    calculateExpenses();
+                }
+            },
+            error: function () {
+                alert('Có lỗi xảy ra khi thêm chi phí');
+            }
+        });
+    });
 </script>
 {% endblock %}
