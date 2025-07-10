@@ -79,6 +79,8 @@ def create_event():
     if data.get('password'):
         event.password_hash = str(hash_password(data['password']).decode('utf-8'))
         event.has_password = True
+        # Tự động lưu session khi tạo event có mật khẩu
+        session[f'event_{event_id}_authenticated'] = True
 
     event.save()
 
@@ -115,12 +117,51 @@ def join_event():
 def event_detail(event_id):
     try:
         event = Event.objects.get(event_id=event_id)
+        
+        # Kiểm tra nếu event có mật khẩu
+        if event.has_password:
+            # Kiểm tra session để xem đã xác thực chưa
+            if f'event_{event_id}_authenticated' not in session:
+                return render_template('event_password.html', event=event)
+        
         return render_template('event_detail.html', event=event)
     except Event.DoesNotExist:
         return redirect(url_for('index'))
 
+@app.route('/event/<event_id>/verify_password', methods=['POST'])
+def verify_event_password(event_id):
+    try:
+        event = Event.objects.get(event_id=event_id)
+        password = request.form.get('password')
+        
+        if event.has_password:
+            if not password or not check_password(password, event.password_hash):
+                return render_template('event_password.html', event=event, error='Mật khẩu không đúng')
+            
+            # Lưu vào session để đánh dấu đã xác thực
+            session[f'event_{event_id}_authenticated'] = True
+        
+        return redirect(url_for('event_detail', event_id=event_id))
+    except Event.DoesNotExist:
+        return redirect(url_for('index'))
+
+
+def require_event_auth(f):
+    """Decorator để kiểm tra xác thực cho event"""
+    def decorated_function(event_id, *args, **kwargs):
+        try:
+            event = Event.objects.get(event_id=event_id)
+            if event.has_password:
+                if f'event_{event_id}_authenticated' not in session:
+                    return jsonify({'error': 'Unauthorized'}), 401
+            return f(event_id, *args, **kwargs)
+        except Event.DoesNotExist:
+            return jsonify({'error': 'Event not found'}), 404
+    decorated_function.__name__ = f.__name__
+    return decorated_function
 
 @app.route('/api/event/<event_id>/members', methods=['GET'])
+@require_event_auth
 def get_members(event_id):
     try:
         event = Event.objects.get(event_id=event_id)
@@ -145,8 +186,8 @@ def get_members(event_id):
     except Event.DoesNotExist:
         return jsonify({'error': 'Event not found'}), 404
 
-
 @app.route('/api/event/<event_id>/members', methods=['POST'])
+@require_event_auth
 def add_member(event_id):
     try:
         event = Event.objects.get(event_id=event_id)
@@ -172,8 +213,8 @@ def add_member(event_id):
     except Event.DoesNotExist:
         return jsonify({'error': 'Event not found'}), 404
 
-
 @app.route('/api/event/<event_id>/expenses', methods=['GET'])
+@require_event_auth
 def get_expenses(event_id):
     try:
         event = Event.objects.get(event_id=event_id)
@@ -195,8 +236,8 @@ def get_expenses(event_id):
     except Event.DoesNotExist:
         return jsonify({'error': 'Event not found'}), 404
 
-
 @app.route('/api/event/<event_id>/expenses', methods=['POST'])
+@require_event_auth
 def add_expense(event_id):
     try:
         event = Event.objects.get(event_id=event_id)
@@ -218,8 +259,8 @@ def add_expense(event_id):
     except (Event.DoesNotExist, Member.DoesNotExist):
         return jsonify({'error': 'Event or member not found'}), 404
 
-
 @app.route('/api/event/<event_id>/expenses/<expense_id>', methods=['DELETE'])
+@require_event_auth
 def delete_expense(event_id, expense_id):
     try:
         event = Event.objects.get(event_id=event_id)
@@ -230,6 +271,7 @@ def delete_expense(event_id, expense_id):
         return jsonify({'success': False, 'message': 'Không tìm thấy sự kiện hoặc chi phí.'}), 404
 
 @app.route('/api/event/<event_id>/expenses/<expense_id>', methods=['PUT'])
+@require_event_auth
 def edit_expense(event_id, expense_id):
     try:
         event = Event.objects.get(event_id=event_id)
@@ -249,8 +291,8 @@ def edit_expense(event_id, expense_id):
     except (Event.DoesNotExist, Expense.DoesNotExist, Member.DoesNotExist):
         return jsonify({'success': False, 'message': 'Không tìm thấy sự kiện, chi phí hoặc thành viên.'}), 404
 
-
 @app.route('/api/event/<event_id>/expenses/<expense_id>', methods=['GET'])
+@require_event_auth
 def get_expense_detail(event_id, expense_id):
     try:
         event = Event.objects.get(event_id=event_id)
@@ -265,8 +307,8 @@ def get_expense_detail(event_id, expense_id):
     except (Event.DoesNotExist, Expense.DoesNotExist):
         return jsonify({'error': 'Không tìm thấy sự kiện hoặc chi phí.'}), 404
 
-
 @app.route('/api/event/<event_id>/calculate', methods=['GET'])
+@require_event_auth
 def calculate_expenses(event_id):
     try:
         event = Event.objects.get(event_id=event_id)
@@ -338,8 +380,8 @@ def calculate_expenses(event_id):
     except Event.DoesNotExist:
         return jsonify({'error': 'Event not found'}), 404
 
-
 @app.route('/api/event/<event_id>/update_member_bank', methods=['POST'])
+@require_event_auth
 def update_member_bank(event_id):
     try:
         data = request.get_json()
@@ -353,8 +395,8 @@ def update_member_bank(event_id):
     except Member.DoesNotExist:
         return jsonify({'error': 'Member not found'}), 404
 
-
 @app.route('/api/event/<event_id>/members/<member_id>', methods=['DELETE'])
+@require_event_auth
 def delete_member(event_id, member_id):
     try:
         event = Event.objects.get(event_id=event_id)

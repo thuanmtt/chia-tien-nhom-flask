@@ -219,6 +219,14 @@
         loadExpenses();
     });
 
+    // Thêm xử lý lỗi chung cho tất cả AJAX requests
+    $(document).ajaxError(function(event, xhr, settings) {
+        if (xhr.status === 401) {
+            // Session hết hạn, redirect về trang nhập mật khẩu
+            window.location.href = window.location.href;
+        }
+    });
+
     function loadMembers() {
         $.get(`/api/event/${eventId}/members`, function (data) {
             members = data.members;
