@@ -540,20 +540,18 @@
 
     function shareEvent() {
         const shareUrl = window.location.href;
-        const shareText = `Tham gia sự kiện "${$('h2').text()}" với mã: ${eventId}`;
-
-        if (navigator.share) {
-            navigator.share({
-                title: 'Chia tiền nhóm',
-                text: shareText,
-                url: shareUrl
-            });
-        } else {
-            const fullText = `${shareText}\nLink: ${shareUrl}`;
-            navigator.clipboard.writeText(fullText).then(() => {
-                alert('Đã copy link chia sẻ vào clipboard');
-            });
-        }
+        navigator.clipboard.writeText(shareUrl).then(() => {
+            alert('Đã copy link vào clipboard');
+        }).catch(() => {
+            // Fallback nếu clipboard API không hoạt động
+            const textArea = document.createElement('textarea');
+            textArea.value = shareUrl;
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textArea);
+            alert('Đã copy link vào clipboard');
+        });
     }
 
     // Form submissions
@@ -614,7 +612,7 @@
                     $('#addExpenseModal').modal('hide');
                     $('#addExpenseForm')[0].reset();
                     loadExpenses();
-                    calculateExpenses();
+                    calculateExpenses(false);
                 }
             },
             error: function () {
