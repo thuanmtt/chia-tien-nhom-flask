@@ -160,6 +160,8 @@
                         <h5 class="mb-0">
                             <i class="fas fa-users header-icon"></i>
                             <span id="eventTitle" contenteditable="true">Sự Kiện Mới</span>
+                            <br>
+                            <small id="eventCodeDisplay" class="text-muted"></small>
                         </h5>
                         <div>
                             <button class="btn btn-sm btn-outline-info" id="configBankInfoBtn">
@@ -718,6 +720,15 @@
                         
                         // Cập nhật tên sự kiện
                         $('#eventTitle').text(eventData.title);
+                        // Sau khi set currentEventCode hoặc tạo mới sự kiện, cập nhật eventCodeDisplay
+                        function updateEventCodeDisplay() {
+                            if (currentEventCode) {
+                                $('#eventCodeDisplay').text(currentEventCode);
+                            } else {
+                                $('#eventCodeDisplay').text('');
+                            }
+                        }
+                        updateEventCodeDisplay();
 
                         // Cập nhật thành viên
                         members = eventData.members || [];
