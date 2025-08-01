@@ -143,7 +143,7 @@
                 <li class="nav-item">
                     <a class="nav-link" href="#" id="savedEventsBtn" data-bs-toggle="modal"
                        data-bs-target="#savedEventsModal">
-                        <i class="fas fa-list me-1"></i> Sự Kiện Đã Lưu
+                        <i class="fas fa-list me-1"></i> Sự Kiện Của Tôi
                     </a>
                 </li>
             </ul>
@@ -298,10 +298,14 @@
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Sự Kiện Đã Lưu</h5>
+                <h5 class="modal-title">Sự Kiện Đã Lưu Trên Máy Này</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
+                <div class="alert alert-info mb-3">
+                    <i class="fas fa-info-circle me-2"></i>
+                    Danh sách này chỉ hiển thị các sự kiện đã được lưu trên máy này. Mỗi máy sẽ có danh sách sự kiện riêng.
+                </div>
                 <div id="savedEventsList" class="list-group"></div>
             </div>
             <div class="modal-footer">
@@ -462,8 +466,10 @@
         if (urlEventCode) {
             currentEventCode = urlEventCode;
             localStorage.setItem('currentEventCode', currentEventCode);
+            saveEventCodeToLocalStorage(currentEventCode); // Lưu event_code vào localStorage
             loadEventFromServer(currentEventCode);
         } else if (currentEventCode) {
+            saveEventCodeToLocalStorage(currentEventCode); // Lưu event_code vào localStorage
             loadEventFromServer(currentEventCode);
         } else {
             // Tạo sự kiện mới
@@ -687,8 +693,9 @@
                         if (response.success) {
                             currentEventCode = response.event_code;
                             localStorage.setItem('currentEventCode', currentEventCode);
+                            saveEventCodeToLocalStorage(currentEventCode); // Lưu event_code vào localStorage
                             if (showAlert) {
-                                showToast('Sự kiện đã được tạo thành công!', 'success');
+                                showToast('Sự kiện đã được tạo thành công và thêm vào danh sách của bạn!', 'success');
                             }
                         }
                     },
@@ -725,11 +732,10 @@
 
                         // Lưu event_code vào localStorage
                         localStorage.setItem('currentEventCode', currentEventCode);
+                        saveEventCodeToLocalStorage(currentEventCode); // Lưu vào danh sách sự kiện đã lưu
 
                         // Tự động tính toán khi tải sự kiện
                         calculateSplit(false);
-                        
-                        showToast('Đã tải sự kiện thành công!', 'success');
                     } else {
                         showToast('Không tìm thấy sự kiện!', 'error');
                         createNewEvent();
@@ -740,18 +746,6 @@
                     createNewEvent();
                 }
             });
-        }
-
-        // Hàm tạo sự kiện mới
-        function createNewEvent() {
-            currentEventCode = null;
-            $('#eventTitle').text('Sự Kiện Mới');
-            members = [];
-            expenses = [];
-            bankInfo = {};
-            renderMembers();
-            renderExpenses();
-            $('#resultContainer').hide();
         }
 
         // Hàm hiển thị danh sách thành viên
@@ -836,62 +830,108 @@
             }
         }
 
+        // Hàm lưu event_code vào localStorage
+        function saveEventCodeToLocalStorage(eventCode) {
+            let savedEventCodes = JSON.parse(localStorage.getItem('savedEventCodes') || '[]');
+            if (!savedEventCodes.includes(eventCode)) {
+                savedEventCodes.push(eventCode);
+                localStorage.setItem('savedEventCodes', JSON.stringify(savedEventCodes));
+            }
+        }
+
+        // Hàm xóa event_code khỏi localStorage
+        function removeEventCodeFromLocalStorage(eventCode) {
+            let savedEventCodes = JSON.parse(localStorage.getItem('savedEventCodes') || '[]');
+            savedEventCodes = savedEventCodes.filter(code => code !== eventCode);
+            localStorage.setItem('savedEventCodes', JSON.stringify(savedEventCodes));
+        }
+
         // Hàm hiển thị danh sách sự kiện đã lưu
         function renderSavedEvents() {
             $('#savedEventsList').empty();
             $('#savedEventsList').append('<p class="text-center text-muted">Đang tải...</p>');
             
-            $.ajax({
-                url: '/api/events',
-                method: 'GET',
-                success: function(response) {
-                    if (response.success) {
-                        const events = response.events;
-                        $('#savedEventsList').empty();
-                        
-                        if (events.length === 0) {
-                            $('#savedEventsList').append('<p class="text-center text-muted">Chưa có sự kiện nào được lưu.</p>');
-                            return;
+            // Lấy danh sách event_code đã lưu trong localStorage
+            const savedEventCodes = JSON.parse(localStorage.getItem('savedEventCodes') || '[]');
+            
+            if (savedEventCodes.length === 0) {
+                $('#savedEventsList').empty();
+                $('#savedEventsList').append('<p class="text-center text-muted">Chưa có sự kiện nào được lưu trên máy này.</p>');
+                return;
+            }
+            
+            // Tải thông tin chi tiết của từng sự kiện
+            let loadedEvents = 0;
+            const events = [];
+            
+            savedEventCodes.forEach(function(eventCode) {
+                $.ajax({
+                    url: `/api/events/${eventCode}`,
+                    method: 'GET',
+                    success: function(response) {
+                        if (response.success) {
+                            events.push(response.event);
                         }
+                        loadedEvents++;
                         
-                        events.forEach(function(event) {
-                            const date = new Date(event.updated_at).toLocaleDateString('vi-VN');
-                            const time = new Date(event.updated_at).toLocaleTimeString('vi-VN', {hour: '2-digit', minute: '2-digit'});
-                            
-                            $('#savedEventsList').append(`
-                                <div class="list-group-item list-group-item-action event-item" data-event-code="${event.event_code}">
-                                    <div class="d-flex w-100 justify-content-between">
-                                        <h5 class="mb-1">${event.title}</h5>
-                                        <small class="text-muted">${date} ${time}</small>
-                                    </div>
-                                    <div class="d-flex justify-content-between align-items-center">
-                                        <div>
-                                            <p class="mb-1">Số thành viên: ${event.members_count}</p>
-                                            <p class="mb-1">Số chi phí: ${event.expenses_count}</p>
-                                            <p class="mb-1">Tổng chi phí: ${formatCurrency(event.total_expense)}</p>
-                                            <small class="text-muted">Mã: ${event.event_code}</small>
-                                        </div>
-                                        <div>
-                                            <button class="btn btn-sm btn-outline-primary me-1 share-event-btn" data-event-code="${event.event_code}">
-                                                <i class="fas fa-share-alt"></i>
-                                            </button>
-                                            <button class="btn btn-sm btn-danger delete-event-btn" data-event-code="${event.event_code}">
-                                                <i class="fas fa-trash"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            `);
-                        });
-                    } else {
-                        $('#savedEventsList').empty();
-                        $('#savedEventsList').append('<p class="text-center text-danger">Lỗi khi tải danh sách sự kiện!</p>');
+                        // Khi đã tải xong tất cả, hiển thị danh sách
+                        if (loadedEvents === savedEventCodes.length) {
+                            displaySavedEvents(events);
+                        }
+                    },
+                    error: function() {
+                        loadedEvents++;
+                        // Nếu sự kiện không tồn tại trên server, xóa khỏi localStorage
+                        removeEventCodeFromLocalStorage(eventCode);
+                        
+                        if (loadedEvents === savedEventCodes.length) {
+                            displaySavedEvents(events);
+                        }
                     }
-                },
-                error: function() {
-                    $('#savedEventsList').empty();
-                    $('#savedEventsList').append('<p class="text-center text-danger">Lỗi kết nối server!</p>');
-                }
+                });
+            });
+        }
+
+        // Hàm hiển thị danh sách sự kiện
+        function displaySavedEvents(events) {
+            $('#savedEventsList').empty();
+            
+            if (events.length === 0) {
+                $('#savedEventsList').append('<p class="text-center text-muted">Chưa có sự kiện nào được lưu trên máy này.</p>');
+                return;
+            }
+            
+            // Sắp xếp theo thời gian cập nhật mới nhất
+            events.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+            
+            events.forEach(function(event) {
+                const date = new Date(event.updated_at).toLocaleDateString('vi-VN');
+                const time = new Date(event.updated_at).toLocaleTimeString('vi-VN', {hour: '2-digit', minute: '2-digit'});
+                
+                $('#savedEventsList').append(`
+                    <div class="list-group-item list-group-item-action event-item" data-event-code="${event.event_code}">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h5 class="mb-1">${event.title}</h5>
+                            <small class="text-muted">${date} ${time}</small>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <p class="mb-1">Số thành viên: ${event.members ? event.members.length : 0}</p>
+                                <p class="mb-1">Số chi phí: ${event.expenses ? event.expenses.length : 0}</p>
+                                <p class="mb-1">Tổng chi phí: ${formatCurrency(event.expenses ? event.expenses.reduce((sum, exp) => sum + parseFloat(exp.amount), 0) : 0)}</p>
+                                <small class="text-muted">Mã: ${event.event_code}</small>
+                            </div>
+                            <div>
+                                <button class="btn btn-sm btn-outline-primary me-1 share-event-btn" data-event-code="${event.event_code}">
+                                    <i class="fas fa-share-alt"></i>
+                                </button>
+                                <button class="btn btn-sm btn-danger delete-event-btn" data-event-code="${event.event_code}">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `);
             });
         }
 
@@ -1255,6 +1295,9 @@
                     success: function(response) {
                         if (response.success) {
                             showToast('Đã xoá sự kiện thành công!', 'success');
+                            
+                            // Xóa event_code khỏi localStorage
+                            removeEventCodeFromLocalStorage(eventCode);
                             
                             // Nếu đang xoá sự kiện hiện tại, tạo mới
                             if (eventCode === currentEventCode) {
