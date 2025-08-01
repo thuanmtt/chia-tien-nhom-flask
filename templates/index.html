@@ -594,6 +594,7 @@
             bankInfo[member] = {bank, account};
             localStorage.setItem('bankInfo', JSON.stringify(bankInfo));
             $('#editBankInfoModal').modal('hide');
+            saveEvent(false);
             renderBankInfoTable();
             showToast('Đã lưu thông tin ngân hàng thành công!', 'success');
         });
