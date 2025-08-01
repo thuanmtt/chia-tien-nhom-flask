@@ -1,0 +1,1348 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Ứng dụng chia tiền nhóm online nhanh chóng và tiện lợi dành cho bạn.">
+    <title>Ứng Dụng Chia Tiền Nhóm Online - Tính Toán & Chia Sẻ Dễ Dàng</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="icon" type="image/x-icon" href="https://avatars.githubusercontent.com/u/86670683">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-85JFS83FXC"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+
+        function gtag() {
+            dataLayer.push(arguments);
+        }
+
+        gtag('js', new Date());
+
+        gtag('config', 'G-85JFS83FXC');
+    </script>
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+
+        .card {
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+
+        .form-control:focus {
+            box-shadow: none;
+            border-color: #6c757d;
+        }
+
+        .btn-primary {
+            background-color: #5c6bc0;
+            border-color: #5c6bc0;
+        }
+
+        .btn-primary:hover {
+            background-color: #4d5aa7;
+            border-color: #4d5aa7;
+        }
+
+        .member-pill {
+            border-radius: 20px;
+            padding: 5px 10px;
+            margin: 5px;
+            display: inline-block;
+            background-color: #e9ecef;
+        }
+
+        .member-close {
+            margin-left: 5px;
+            cursor: pointer;
+            color: #6c757d;
+        }
+
+        .expense-item {
+            border-left: 4px solid #5c6bc0;
+            padding-left: 10px;
+            margin-bottom: 10px;
+        }
+
+        .transfer-item {
+            background-color: #e9f7ef;
+            border-radius: 5px;
+            padding: 10px;
+            margin-bottom: 5px;
+        }
+
+        .header-icon {
+            margin-right: 10px;
+            color: #5c6bc0;
+        }
+
+        .action-btn {
+            cursor: pointer;
+            color: #6c757d;
+            margin-left: 5px;
+        }
+
+        .action-btn:hover {
+            color: #5c6bc0;
+        }
+
+        .event-item {
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .event-item:hover {
+            background-color: #f8f9fa;
+        }
+        .select2-container--default .select2-selection--single .select2-selection__rendered img {
+            height: 16px;
+            width: auto;
+            margin-right: 10px;
+            vertical-align: middle;
+            object-fit: contain;
+        }
+        .select2-results__option img {
+            height: 16px;
+            width: auto;
+            margin-right: 10px;
+            vertical-align: middle;
+            object-fit: contain;
+        }
+        .select2-container--default .select2-selection--single .select2-selection__rendered {
+            display: flex;
+            align-items: center;
+        }
+        .select2-results__option {
+            display: flex !important;
+            align-items: center;
+        }
+    </style>
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+    <div class="container">
+        <a class="navbar-brand" href="#">
+            <i class="fas fa-money-bill-wave me-2"></i>
+            Ứng Dụng Chia Tiền Nhóm
+        </a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav ms-auto">
+                <li class="nav-item">
+                    <a class="nav-link active" href="#" id="newEventBtn">
+                        <i class="fas fa-plus me-1"></i> Tạo Sự Kiện Mới
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="#" id="savedEventsBtn" data-bs-toggle="modal"
+                       data-bs-target="#savedEventsModal">
+                        <i class="fas fa-list me-1"></i> Sự Kiện Đã Lưu
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-lg-8 mx-auto">
+            <div class="card mb-4">
+                <div class="card-header bg-white">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">
+                            <i class="fas fa-users header-icon"></i>
+                            <span id="eventTitle" contenteditable="true">Sự Kiện Mới</span>
+                        </h5>
+                        <div>
+                            <button class="btn btn-sm btn-outline-info" id="configBankInfoBtn">
+                                <i class="fas fa-university me-1"></i> Cấu hình ngân hàng
+                            </button>
+                            <button class="btn btn-sm btn-outline-primary me-2" id="saveEventBtn">
+                                <i class="fas fa-save me-1"></i> Lưu
+                            </button>
+                            <button class="btn btn-sm btn-outline-success me-2" id="shareEventBtn">
+                                <i class="fas fa-share-alt me-1"></i> Chia sẻ
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="mb-4">
+                        <h6 class="mb-3"><i class="fas fa-user-plus me-2"></i>Thành Viên</h6>
+                        <form id="memberForm" class="mb-3">
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="memberName" name="memberName"
+                                       placeholder="Tên thành viên...">
+                                <button type="submit" class="btn btn-primary">Thêm</button>
+                            </div>
+                        </form>
+                        <div id="membersList" class="d-flex flex-wrap"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0"><i class="fas fa-receipt header-icon"></i>Chi Phí</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <form id="expenseForm">
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-6">
+                                    <label for="expenseTitle" class="form-label">Mục chi tiêu</label>
+                                    <input type="text" class="form-control" id="expenseTitle" name="expenseTitle"
+                                           placeholder="Ví dụ: Tiền ăn, tiền xe...">
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="expenseAmount" class="form-label">Số tiền (VND)</label>
+                                    <input type="number" class="form-control" id="expenseAmount" name="expenseAmount"
+                                           placeholder="Nhập số tiền...">
+                                </div>
+                            </div>
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-6">
+                                    <label for="expensePayer" class="form-label">Người thanh toán</label>
+                                    <select class="form-select" id="expensePayer" name="expensePayer">
+                                        <option value="" selected disabled>Chọn người thanh toán...</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="benefitType" class="form-label">Thanh toán cho ai</label>
+                                    <select class="form-select" id="benefitType" name="benefitType">
+                                        <option value="all" selected>Cho tất cả</option>
+                                        <option value="selected">Cho một số người</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row g-3 mb-3" id="beneficiariesContainer" style="display: none;">
+                                <div class="col-12">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <label class="form-label">Chọn người được hưởng lợi</label>
+                                        <div>
+                                            <button type="button" class="btn btn-sm btn-outline-primary mb-2"
+                                                    id="selectAllBeneficiaries">Chọn tất cả
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div id="beneficiariesList" class="border rounded p-2">
+                                        <!-- Danh sách checkboxes sẽ được render ở đây -->
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-12 d-flex align-items-end">
+                                    <button type="submit" class="btn btn-primary w-100">Thêm Chi Phí</button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="expenses-list mt-4">
+                        <h6 class="mb-3">Danh sách chi phí</h6>
+                        <div id="expensesList"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header bg-white">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="fas fa-calculator header-icon"></i>Kết Quả Chia Tiền</h5>
+                        <button class="btn btn-primary" id="calculateBtn">Tính Toán</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="resultContainer" style="display: none;">
+                        <div class="summary mb-4">
+                            <h6>Tổng quan</h6>
+                            <div class="table-responsive">
+                                <table class="table table-bordered table-hover">
+                                    <thead class="table-light">
+                                    <tr>
+                                        <th>Thành viên</th>
+                                        <th>Đã chi trả</th>
+                                        <th>Cần trả</th>
+                                        <th>Số dư</th>
+                                    </tr>
+                                    </thead>
+                                    <tbody id="summaryTableBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="transfers">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h6 class="mb-0">Các giao dịch cần thực hiện</h6>
+                                <button class="btn btn-sm btn-outline-primary" id="copyTransfersBtn">
+                                    <i class="fas fa-copy me-1"></i> Copy
+                                </button>
+                            </div>
+                            <div id="transfersList"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Sự Kiện Đã Lưu -->
+<div class="modal fade" id="savedEventsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Sự Kiện Đã Lưu</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="savedEventsList" class="list-group"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="toast-container position-fixed top-0 end-0 p-3" id="toastContainer"></div>
+
+<!-- Modal Chia Sẻ Sự Kiện -->
+<div class="modal fade" id="shareEventModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Chia Sẻ Sự Kiện</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Sử dụng đường link dưới đây để chia sẻ thông tin sự kiện:</p>
+                <div class="input-group mb-3">
+                    <input type="text" class="form-control" id="shareLink" readonly>
+                    <button class="btn btn-primary" id="copyShareLinkBtn">
+                        <i class="fas fa-copy me-1"></i> Copy
+                    </button>
+                </div>
+                <div class="alert alert-info mt-3">
+                    <i class="fas fa-info-circle me-2"></i> Link này chứa tất cả thông tin về sự kiện, bao gồm danh sách
+                    thành viên, chi phí và thông tin ngân hàng.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Cấu Hình Thông Tin Ngân Hàng -->
+<div class="modal fade" id="bankInfoModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Cấu Hình Thông Tin Ngân Hàng</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                        <tr>
+                            <th>Thành viên</th>
+                            <th>Ngân hàng</th>
+                            <th>Số tài khoản</th>
+                            <th>Thao tác</th>
+                        </tr>
+                        </thead>
+                        <tbody id="bankInfoTableBody">
+                        <!-- Dữ liệu sẽ được thêm vào đây -->
+                        </tbody>
+                    </table>
+                </div>
+                <div class="mt-3">
+                    <button class="btn btn-primary" id="addBankInfoBtn">
+                        <i class="fas fa-plus me-1"></i> Thêm thông tin ngân hàng
+                    </button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Thêm/Sửa Thông Tin Ngân Hàng -->
+<div class="modal fade" id="editBankInfoModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Thêm/Sửa Thông Tin Ngân Hàng</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="bankInfoForm">
+                    <div class="mb-3">
+                        <label class="form-label">Thành viên</label>
+                        <select class="form-select" id="bankInfoMember" required>
+                            <option value="" selected disabled>Chọn thành viên...</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Ngân hàng</label>
+                        <select class="form-select" id="bankInfoBank" required>
+                            <option value="" selected disabled>Chọn ngân hàng...</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Số tài khoản</label>
+                        <input type="text" class="form-control" id="bankInfoAccount" required>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                <button type="button" class="btn btn-primary" id="saveBankInfoBtn">Lưu</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Hiển Thị QR Code -->
+<div class="modal fade" id="qrCodeModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Mã QR Chuyển Khoản</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-center">
+                <div id="qrCodeContainer">
+                    <img id="qrCodeImage" src="" alt="QR Code" class="img-fluid">
+                </div>
+                <div class="mt-3">
+                    <button class="btn btn-primary" id="downloadQrBtn">
+                        <i class="fas fa-download me-1"></i> Tải ảnh QR
+                    </button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<footer class="bg-light py-3 mt-5">
+    <div class="container text-center">
+        <p class="text-muted mb-0">© 2025 Ứng Dụng Chia Tiền Nhóm</p>
+    </div>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+<script>
+    $(document).ready(function () {
+        let currentEventCode = localStorage.getItem('currentEventCode') || null;
+        let members = [];
+        let expenses = [];
+        let bankInfo = {};
+
+        // Kiểm tra xem có event_code trong URL không
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlEventCode = urlParams.get('event_code');
+        
+        if (urlEventCode) {
+            currentEventCode = urlEventCode;
+            localStorage.setItem('currentEventCode', currentEventCode);
+            loadEventFromServer(currentEventCode);
+        } else if (currentEventCode) {
+            loadEventFromServer(currentEventCode);
+        } else {
+            // Tạo sự kiện mới
+            createNewEvent();
+        }
+
+        // Load danh sách ngân hàng
+        $.getJSON('/api/banks', function (data) {
+            const banks = data.data.filter(bank => bank.supported);
+            banks.forEach(bank => {
+                $('#bankInfoBank').append(
+                    `<option value="${bank.code}" data-image="https://qr.sepay.vn/assets/img/banklogo/${bank.code}.png">
+                        ${bank.short_name} - ${bank.name}
+                    </option>`
+                );
+            });
+
+            // Khởi tạo select2 sau khi append xong
+            $('#bankInfoBank').select2({
+                dropdownParent: $('#editBankInfoModal'), // Đảm bảo dropdown hiển thị đúng trong modal
+                templateResult: formatBankOption,
+                templateSelection: formatBankOption,
+                width: '100%'
+            });
+        });
+
+        // Cập nhật danh sách thành viên trong modal cấu hình ngân hàng
+        function updateBankInfoMembers() {
+            $('#bankInfoMember').empty();
+            $('#bankInfoMember').append('<option value="" selected disabled>Chọn thành viên...</option>');
+            members.forEach(member => {
+                $('#bankInfoMember').append(`<option value="${member}">${member}</option>`);
+            });
+        }
+
+        // Hiển thị bảng thông tin ngân hàng
+        function renderBankInfoTable() {
+            $('#bankInfoTableBody').empty();
+
+            members.forEach(member => {
+                const info = bankInfo[member] || {};
+                const bankOption = $('#bankInfoBank option[value="' + (info.bank || '') + '"]');
+                const bankName = bankOption.text() || '';
+                const bankLogo = bankOption.data('image') ? `<img src="${bankOption.data('image')}" style="height:16px;width:auto;vertical-align:middle;margin-right:8px;"/>` : '';
+
+                $('#bankInfoTableBody').append(`
+                    <tr>
+                        <td>${member}</td>
+                        <td>${bankLogo}${bankName}</td>
+                        <td>${info.account || ''}</td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary edit-bank-info" data-member="${member}">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            ${info.bank ? `
+                                <button class="btn btn-sm btn-outline-danger delete-bank-info" data-member="${member}">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            ` : ''}
+                        </td>
+                    </tr>
+                `);
+            });
+        }
+
+        // Xử lý khi bấm nút cấu hình ngân hàng
+        $('#configBankInfoBtn').click(function () {
+            renderBankInfoTable();
+            $('#bankInfoModal').modal('show');
+        });
+
+        // Xử lý khi bấm nút thêm thông tin ngân hàng
+        $('#addBankInfoBtn').click(function () {
+            updateBankInfoMembers();
+            $('#bankInfoMember').val('');
+            $('#bankInfoBank').val('');
+            $('#bankInfoAccount').val('');
+            $('#editBankInfoModal').modal('show');
+        });
+
+        // Xử lý khi bấm nút sửa thông tin ngân hàng
+        $(document).on('click', '.edit-bank-info', function () {
+            const member = $(this).data('member');
+            const info = bankInfo[member] || {};
+
+            updateBankInfoMembers();
+            $('#bankInfoMember').val(member);
+            $('#bankInfoBank').val(info.bank || '');
+            $('#bankInfoAccount').val(info.account || '');
+
+            $('#editBankInfoModal').modal('show');
+        });
+
+        // Xử lý khi bấm nút xóa thông tin ngân hàng
+        $(document).on('click', '.delete-bank-info', function () {
+            const member = $(this).data('member');
+            if (confirm(`Bạn có chắc chắn muốn xóa thông tin ngân hàng của ${member}?`)) {
+                delete bankInfo[member];
+                localStorage.setItem('bankInfo', JSON.stringify(bankInfo));
+                renderBankInfoTable();
+                showToast('Đã xóa thông tin ngân hàng thành công!', 'success');
+            }
+        });
+
+        // Xử lý khi chọn thành viên trong modal thêm/sửa
+        $('#bankInfoMember').change(function () {
+            const member = $(this).val();
+            if (member && bankInfo[member]) {
+                $('#bankInfoBank').val(bankInfo[member].bank);
+                $('#bankInfoAccount').val(bankInfo[member].account);
+            } else {
+                $('#bankInfoBank').val('');
+                $('#bankInfoAccount').val('');
+            }
+        });
+
+        // Xử lý khi lưu thông tin ngân hàng
+        $('#saveBankInfoBtn').click(function () {
+            const member = $('#bankInfoMember').val();
+            const bank = $('#bankInfoBank').val();
+            const account = $('#bankInfoAccount').val();
+
+            if (!member || !bank || !account) {
+                showToast('Vui lòng điền đầy đủ thông tin!', 'warning');
+                return;
+            }
+
+            bankInfo[member] = {bank, account};
+            localStorage.setItem('bankInfo', JSON.stringify(bankInfo));
+            $('#editBankInfoModal').modal('hide');
+            renderBankInfoTable();
+            showToast('Đã lưu thông tin ngân hàng thành công!', 'success');
+        });
+
+        // Xử lý khi bấm nút tạo QR code
+        $(document).on('click', '.generate-qr-btn', function () {
+            const from = $(this).data('from');
+            const to = $(this).data('to');
+            const amount = $(this).data('amount');
+
+            if (!bankInfo[to]) {
+                showToast('Vui lòng cấu hình thông tin ngân hàng cho người nhận trước!', 'warning');
+                return;
+            }
+
+            const bankInfoTo = bankInfo[to];
+            const qrUrl = `https://qr.sepay.vn/img?acc=${bankInfoTo.account}&bank=${bankInfoTo.bank}&amount=${amount}&template=compact&download=false`;
+            // qrUrl += `&des=Chuyen tien cho ${to}`;
+
+            $('#qrCodeImage').attr('src', qrUrl);
+            $('#qrCodeModal').modal('show');
+        });
+
+        // Xử lý khi bấm nút tải ảnh QR
+        $('#downloadQrBtn').click(function () {
+            const qrUrl = $('#qrCodeImage').attr('src');
+            const link = document.createElement('a');
+            link.href = qrUrl;
+            link.download = 'qr-code.png';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+
+        // Format số tiền thành định dạng VND
+        function formatCurrency(amount) {
+            return new Intl.NumberFormat('vi-VN').format(amount) + ' VND';
+        }
+
+        // Hàm tạo sự kiện mới
+        function createNewEvent() {
+            currentEventCode = null;
+            $('#eventTitle').text('Sự Kiện Mới');
+            members = [];
+            expenses = [];
+            bankInfo = {};
+            renderMembers();
+            renderExpenses();
+            $('#resultContainer').hide();
+        }
+
+        // Hàm lưu dữ liệu vào server
+        function saveEvent(showAlert = true) {
+            if (members.length === 0 && showAlert) {
+                showToast('Vui lòng thêm ít nhất một thành viên trước khi lưu!', 'warning');
+                return;
+            }
+
+            const eventData = {
+                title: $('#eventTitle').text(),
+                members: members,
+                expenses: expenses,
+                bankInfo: bankInfo
+            };
+
+            if (currentEventCode) {
+                // Cập nhật sự kiện hiện có
+                $.ajax({
+                    url: `/api/events/${currentEventCode}`,
+                    method: 'PUT',
+                    contentType: 'application/json',
+                    data: JSON.stringify(eventData),
+                    success: function(response) {
+                        if (response.success && showAlert) {
+                            showToast('Sự kiện đã được cập nhật thành công!', 'success');
+                        }
+                    },
+                    error: function() {
+                        showToast('Lỗi khi cập nhật sự kiện!', 'error');
+                    }
+                });
+            } else {
+                // Tạo sự kiện mới
+                $.ajax({
+                    url: '/api/events',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(eventData),
+                    success: function(response) {
+                        if (response.success) {
+                            currentEventCode = response.event_code;
+                            localStorage.setItem('currentEventCode', currentEventCode);
+                            if (showAlert) {
+                                showToast('Sự kiện đã được tạo thành công!', 'success');
+                            }
+                        }
+                    },
+                    error: function() {
+                        showToast('Lỗi khi tạo sự kiện!', 'error');
+                    }
+                });
+            }
+        }
+
+        // Hàm tải sự kiện từ server
+        function loadEventFromServer(eventCode) {
+            $.ajax({
+                url: `/api/events/${eventCode}`,
+                method: 'GET',
+                success: function(response) {
+                    if (response.success) {
+                        const eventData = response.event;
+                        currentEventCode = eventData.event_code;
+                        
+                        // Cập nhật tên sự kiện
+                        $('#eventTitle').text(eventData.title);
+
+                        // Cập nhật thành viên
+                        members = eventData.members || [];
+                        renderMembers();
+
+                        // Cập nhật chi phí
+                        expenses = eventData.expenses || [];
+                        renderExpenses();
+
+                        // Cập nhật thông tin ngân hàng
+                        bankInfo = eventData.bankInfo || {};
+
+                        // Lưu event_code vào localStorage
+                        localStorage.setItem('currentEventCode', currentEventCode);
+
+                        // Tự động tính toán khi tải sự kiện
+                        calculateSplit(false);
+                        
+                        showToast('Đã tải sự kiện thành công!', 'success');
+                    } else {
+                        showToast('Không tìm thấy sự kiện!', 'error');
+                        createNewEvent();
+                    }
+                },
+                error: function() {
+                    showToast('Lỗi khi tải sự kiện!', 'error');
+                    createNewEvent();
+                }
+            });
+        }
+
+        // Hàm tạo sự kiện mới
+        function createNewEvent() {
+            currentEventCode = null;
+            $('#eventTitle').text('Sự Kiện Mới');
+            members = [];
+            expenses = [];
+            bankInfo = {};
+            renderMembers();
+            renderExpenses();
+            $('#resultContainer').hide();
+        }
+
+        // Hàm hiển thị danh sách thành viên
+        function renderMembers() {
+            $('#membersList').empty();
+            $('#expensePayer').empty();
+            $('#expensePayer').append('<option value="" selected disabled>Chọn người thanh toán...</option>');
+
+            members.forEach(function (member, index) {
+                $('#membersList').append(`
+                <div class="member-pill">
+                    ${member}
+                    <span class="member-close" data-index="${index}"><i class="fas fa-times"></i></span>
+                </div>
+            `);
+
+                $('#expensePayer').append(`<option value="${member}">${member}</option>`);
+            });
+
+            // Tự động tính toán khi danh sách thành viên thay đổi
+            autoCalculate();
+        }
+
+        // Hàm hiển thị danh sách chi phí
+        function renderExpenses() {
+            $('#expensesList').empty();
+
+            if (expenses.length === 0) {
+                $('#expensesList').append('<p class="text-muted">Chưa có chi phí nào.</p>');
+                autoCalculate();
+                return;
+            }
+
+            expenses.forEach(function (expense, index) {
+                let benefitInfo = '';
+                if (expense.benefitType === 'all') {
+                    benefitInfo = 'cho tất cả mọi người';
+                } else if (expense.beneficiaries && expense.beneficiaries.length > 0) {
+                    if (expense.beneficiaries.length === 1) {
+                        benefitInfo = `chỉ cho ${expense.beneficiaries[0]}`;
+                    } else if (expense.beneficiaries.length === 2) {
+                        benefitInfo = `cho ${expense.beneficiaries.join(' và ')}`;
+                    } else if (expense.beneficiaries.length < members.length) {
+                        benefitInfo = `cho ${expense.beneficiaries.length} người: (${expense.beneficiaries.join(', ')})`;
+                    } else {
+                        benefitInfo = 'cho tất cả mọi người';
+                    }
+                }
+
+                $('#expensesList').append(`
+        <div class="expense-item p-2">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h6 class="mb-1">${expense.title}</h6>
+                    <p class="mb-0 text-muted">
+                        <small>${expense.payer} đã thanh toán ${formatCurrency(expense.amount)} ${benefitInfo}</small>
+                    </p>
+                </div>
+                <div>
+                    <span class="action-btn edit-expense" data-index="${index}">
+                        <i class="fas fa-edit"></i>
+                    </span>
+                    <span class="action-btn delete-expense" data-index="${index}">
+                        <i class="fas fa-trash"></i>
+                    </span>
+                </div>
+            </div>
+        </div>
+        `);
+            });
+
+            autoCalculate();
+        }
+
+        // Hàm tự động tính toán nếu có dữ liệu hợp lệ
+        function autoCalculate() {
+            if (members.length > 0 && expenses.length > 0) {
+                calculateSplit(false); // Không hiển thị thông báo lỗi
+            } else {
+                // Ẩn kết quả nếu không đủ dữ liệu
+                $('#resultContainer').hide();
+            }
+        }
+
+        // Hàm hiển thị danh sách sự kiện đã lưu (tạm thời ẩn chức năng này)
+        function renderSavedEvents() {
+            $('#savedEventsList').empty();
+            $('#savedEventsList').append('<p class="text-center text-muted">Chức năng này đang được phát triển.</p>');
+        }
+
+        // Thuật toán chia tiền
+        function calculateSplit(showErrors = true) {
+            if (members.length === 0) {
+                if (showErrors) showToast('Vui lòng thêm ít nhất một thành viên!', 'warning');
+                $('#resultContainer').hide();
+                return;
+            }
+
+            if (expenses.length === 0) {
+                if (showErrors) showToast('Vui lòng thêm ít nhất một chi phí!', 'warning');
+                $('#resultContainer').hide();
+                return;
+            }
+
+            // Khởi tạo số dư cho mỗi thành viên
+            const balances = {};
+            members.forEach(member => {
+                balances[member] = 0;
+            });
+
+            // Cộng tiền đã chi cho người thanh toán
+            expenses.forEach(expense => {
+                balances[expense.payer] += parseFloat(expense.amount);
+            });
+
+            // Tính tiền mỗi người phải trả dựa trên số người hưởng lợi
+            expenses.forEach(expense => {
+                const amount = parseFloat(expense.amount);
+                const beneficiaries = expense.beneficiaries || members;
+                const amountPerPerson = amount / beneficiaries.length;
+
+                beneficiaries.forEach(member => {
+                    balances[member] -= amountPerPerson;
+                });
+            });
+
+            // Hiển thị tổng quan
+            $('#summaryTableBody').empty();
+
+            // Tính tổng chi tiêu và phần chi tiêu của từng người
+            const totalExpense = expenses.reduce((sum, expense) => sum + parseFloat(expense.amount), 0);
+
+            // Tạo đối tượng chứa thông tin chi tiêu của từng người
+            const memberExpenseInfo = {};
+            members.forEach(member => {
+                // Số tiền đã trả
+                const paid = expenses
+                    .filter(expense => expense.payer === member)
+                    .reduce((sum, expense) => sum + parseFloat(expense.amount), 0);
+
+                // Số tiền cần trả (dựa trên các chi phí mà thành viên này được hưởng lợi)
+                const needToPay = expenses.reduce((sum, expense) => {
+                    const beneficiaries = expense.beneficiaries || members;
+                    if (beneficiaries.includes(member)) {
+                        return sum + (parseFloat(expense.amount) / beneficiaries.length);
+                    }
+                    return sum;
+                }, 0);
+
+                memberExpenseInfo[member] = {
+                    paid: paid,
+                    needToPay: needToPay
+                };
+
+                $('#summaryTableBody').append(`
+        <tr>
+            <td>${member}</td>
+            <td class="text-end">${formatCurrency(paid)}</td>
+            <td class="text-end">${formatCurrency(needToPay)}</td>
+            <td class="text-end ${balances[member] >= 0 ? 'text-success' : 'text-danger'}">
+                ${formatCurrency(balances[member])}
+            </td>
+        </tr>
+        `);
+            });
+
+            // Tính toán các giao dịch chuyển tiền
+            const creditors = []; // Những người đã trả nhiều hơn
+            const debtors = [];   // Những người trả ít hơn
+
+            for (let member in balances) {
+                if (balances[member] > 0.01) {  // Dùng 0.01 thay vì 0 để tránh lỗi làm tròn số thập phân
+                    creditors.push({name: member, amount: balances[member]});
+                } else if (balances[member] < -0.01) {
+                    debtors.push({name: member, amount: -balances[member]});
+                }
+            }
+
+            // Sắp xếp theo số tiền giảm dần
+            creditors.sort((a, b) => b.amount - a.amount);
+            debtors.sort((a, b) => b.amount - a.amount);
+
+            // Tính toán các giao dịch chuyển tiền
+            const transfers = [];
+            let i = 0, j = 0;
+
+            while (i < creditors.length && j < debtors.length) {
+                const creditor = creditors[i];
+                const debtor = debtors[j];
+
+                // Số tiền chuyển là giá trị nhỏ nhất giữa hai số dư
+                const transferAmount = Math.min(creditor.amount, debtor.amount);
+
+                if (transferAmount > 0.01) {
+                    transfers.push({
+                        from: debtor.name,
+                        to: creditor.name,
+                        amount: Math.round(transferAmount)
+                    });
+                }
+
+                // Cập nhật số dư
+                creditor.amount -= transferAmount;
+                debtor.amount -= transferAmount;
+
+                // Nếu số dư của người nào đó đã giải quyết, chuyển sang người tiếp theo
+                if (creditor.amount < 0.01) i++;
+                if (debtor.amount < 0.01) j++;
+            }
+
+            // Hiển thị các giao dịch chuyển tiền
+            $('#transfersList').empty();
+
+            if (transfers.length === 0) {
+                $('#transfersList').append('<p class="text-muted">Không cần chuyển tiền.</p>');
+            } else {
+                transfers.forEach(transfer => {
+                    $('#transfersList').append(`
+            <div class="transfer-item">
+                <i class="fas fa-exchange-alt me-2"></i>
+                <strong>${transfer.from}</strong> chuyển <strong>${formatCurrency(transfer.amount)}</strong> cho <strong>${transfer.to}</strong>
+                <div class="mt-2">
+                    <button class="btn btn-sm btn-outline-primary generate-qr-btn" data-from="${transfer.from}" data-to="${transfer.to}" data-amount="${transfer.amount}">
+                        <i class="fas fa-qrcode me-1"></i> Bấm vào đây để tạo QR chuyển tiền
+                    </button>
+                </div>
+            </div>
+            `);
+                });
+            }
+
+            // Hiển thị kết quả
+            $('#resultContainer').show();
+
+            // Tự động lưu sau khi tính toán
+            saveEvent(false);
+        }
+
+        function renderBeneficiaries() {
+            $('#beneficiariesList').empty();
+
+            members.forEach(function (member) {
+                $('#beneficiariesList').append(`
+            <div class="form-check">
+                <input class="form-check-input beneficiary-checkbox" type="checkbox" value="${member}" id="benefit_${member}">
+                <label class="form-check-label" for="benefit_${member}">
+                    ${member}
+                </label>
+            </div>
+        `);
+            });
+        }
+
+        // Hiển thị hoặc ẩn danh sách người hưởng lợi dựa vào loại hưởng lợi
+        $('#benefitType').change(function () {
+            if ($(this).val() === 'selected') {
+                $('#beneficiariesContainer').show();
+                renderBeneficiaries();
+            } else {
+                $('#beneficiariesContainer').hide();
+            }
+        });
+
+
+        // Xử lý khi bấm nút "Chọn tất cả"
+        $('#selectAllBeneficiaries').click(function () {
+            const allChecked = $('.beneficiary-checkbox').length === $('.beneficiary-checkbox:checked').length;
+            $('.beneficiary-checkbox').prop('checked', !allChecked);
+        });
+
+
+        // Xử lý thêm thành viên
+        $('#memberForm').submit(function (e) {
+            e.preventDefault();
+            const memberName = $('#memberName').val().trim();
+
+            if (memberName) {
+                if (members.includes(memberName)) {
+                    showToast('Thành viên này đã được thêm vào danh sách!', 'warning');
+                } else {
+                    members.push(memberName);
+                    renderMembers();
+                    $('#memberName').val('');
+
+                    // Tự động lưu sau khi thêm thành viên
+                    saveEvent(false);
+                    // Không cần gọi autoCalculate() vì đã được gọi trong renderMembers()
+                }
+            } else {
+                showToast('Vui lòng nhập tên thành viên!', 'warning');
+            }
+        });
+
+        // Xử lý xóa thành viên
+        $(document).on('click', '.member-close', function () {
+            const index = $(this).data('index');
+            const memberToRemove = members[index];
+
+            // Kiểm tra xem thành viên có chi phí nào không
+            const hasExpenses = expenses.some(expense => expense.payer === memberToRemove);
+
+            // Kiểm tra nếu thành viên là beneficiaries của bất kỳ khoản chi phí nào
+            const isBeneficiary = expenses.some(expense => expense.beneficiaries && expense.beneficiaries.includes(memberToRemove));
+
+            if (hasExpenses || isBeneficiary) {
+                showToast('Không thể xóa thành viên này vì họ đã có chi phí trong danh sách. Vui lòng xóa chi phí trước!', 'error');
+                return;
+            }
+
+            members.splice(index, 1);
+            renderMembers();
+
+            // Tự động lưu sau khi xóa thành viên
+            saveEvent(false);
+            // Không cần gọi autoCalculate() vì đã được gọi trong renderMembers()
+        });
+
+        // Xử lý thêm chi phí
+        $('#expenseForm').submit(function (e) {
+            e.preventDefault();
+            const title = $('#expenseTitle').val().trim();
+            const amount = $('#expenseAmount').val().trim();
+            const payer = $('#expensePayer').val();
+            const benefitType = $('#benefitType').val();
+
+            if (!title) {
+                showToast('Vui lòng nhập mục chi tiêu!', 'warning');
+                return;
+            }
+
+            if (!amount || isNaN(amount) || parseFloat(amount) <= 0) {
+                showToast('Vui lòng nhập số tiền hợp lệ!', 'warning');
+                return;
+            }
+
+            if (!payer) {
+                showToast('Vui lòng chọn người thanh toán!', 'warning');
+                return;
+            }
+
+            // Xác định người hưởng lợi
+            let beneficiaries = [];
+
+            if (benefitType === 'all') {
+                // Nếu là tất cả, thêm toàn bộ thành viên
+                beneficiaries = [...members];
+            } else {
+                // Nếu chỉ là một số người, lấy danh sách từ checkbox đã chọn
+                $('.beneficiary-checkbox:checked').each(function () {
+                    beneficiaries.push($(this).val());
+                });
+
+                // Kiểm tra nếu không có ai được chọn
+                if (beneficiaries.length === 0) {
+                    showToast('Vui lòng chọn ít nhất một người được hưởng lợi!', 'warning');
+                    return;
+                }
+            }
+
+            expenses.push({
+                title: title,
+                amount: parseFloat(amount),
+                payer: payer,
+                benefitType: benefitType,
+                beneficiaries: beneficiaries
+            });
+
+            renderExpenses();
+
+            // Xóa trắng các trường input
+            $('#expenseTitle').val('');
+            $('#expenseAmount').val('');
+            $('#expensePayer').val('');
+            $('#benefitType').val('all').trigger('change');
+
+            // Tự động lưu sau khi thêm chi phí
+            saveEvent(false);
+        });
+
+        // Xử lý xóa chi phí
+        $(document).on('click', '.delete-expense', function () {
+            const index = $(this).data('index');
+            expenses.splice(index, 1);
+            renderExpenses();
+
+            // Tự động lưu sau khi xóa chi phí
+            saveEvent(false);
+            // Không cần gọi autoCalculate() vì đã được gọi trong renderExpenses()
+        });
+
+        // Vẫn giữ nút tính toán cho trường hợp người dùng muốn tính lại
+        $('#calculateBtn').click(function () {
+            calculateSplit(true); // Hiển thị thông báo lỗi nếu có
+        });
+
+        // Xử lý lưu sự kiện (hiện thông báo)
+        $('#saveEventBtn').click(function () {
+            saveEvent(true);
+        });
+
+        // Xử lý khi người dùng chỉnh sửa tên sự kiện
+        $('#eventTitle').on('blur', function () {
+            const newTitle = $(this).text().trim();
+            if (newTitle) {
+                // Lưu tên sự kiện mới
+                saveEvent(false);
+            } else {
+                showToast('Vui lòng nhập tên sự kiện!', 'warning');
+                $(this).text('Sự Kiện Mới'); // Đặt lại tên mặc định nếu người dùng xóa hết
+            }
+        });
+
+        // Xử lý khi người dùng nhấn Enter để kết thúc chỉnh sửa
+        $('#eventTitle').on('keypress', function (e) {
+            if (e.which === 13) { // 13 là mã phím Enter
+                e.preventDefault(); // Ngăn không cho xuống dòng
+                $(this).blur(); // Kích hoạt sự kiện blur để lưu tên
+            }
+        });
+
+        // Hiển thị danh sách sự kiện đã lưu khi mở modal
+        $('#savedEventsBtn').click(function () {
+            renderSavedEvents();
+        });
+
+        // Xử lý khi chọn sự kiện đã lưu (tạm thời ẩn)
+        $(document).on('click', '.event-item', function (e) {
+            // Tạm thời ẩn chức năng này
+        });
+
+        // Xử lý xoá sự kiện (tạm thời ẩn)
+        $(document).on('click', '.delete-event-btn', function (e) {
+            // Tạm thời ẩn chức năng này
+        });
+
+        // Xử lý tạo sự kiện mới
+        $('#newEventBtn').click(function () {
+            if (confirm('Bạn có chắc chắn muốn tạo sự kiện mới? Dữ liệu hiện tại đã được lưu.')) {
+                createNewEvent();
+                localStorage.removeItem('currentEventCode');
+            }
+        });
+
+        // Hàm hiển thị toast thay cho alert
+        function showToast(message, type = 'info') {
+            const toastId = 'toast-' + Date.now();
+            const bgClass = {
+                'success': 'bg-success text-white',
+                'error': 'bg-danger text-white',
+                'warning': 'bg-warning text-dark',
+                'info': 'bg-info text-dark'
+            };
+            const iconClass = {
+                'success': 'fa-check-circle',
+                'error': 'fa-exclamation-circle',
+                'warning': 'fa-exclamation-triangle',
+                'info': 'fa-info-circle'
+            };
+
+            const toastHTML = `
+                <div class="toast" role="alert" aria-live="assertive" aria-atomic="true" id="${toastId}">
+                    <div class="toast-header ${bgClass[type]}">
+                        <i class="fas ${iconClass[type]} me-2"></i>
+                        <strong class="me-auto">Thông báo</strong>
+                        <small>Vừa xong</small>
+                        <button type="button" class="btn-close ${type === 'success' || type === 'error' ? 'btn-close-white' : ''}" data-bs-dismiss="toast" aria-label="Close"></button>
+                    </div>
+                    <div class="toast-body">
+                        ${message}
+                    </div>
+                </div>
+            `;
+
+            $('#toastContainer').append(toastHTML);
+            const toastElement = document.getElementById(toastId);
+            const toast = new bootstrap.Toast(toastElement, {
+                autohide: true,
+                delay: 3000
+            });
+            toast.show();
+
+            // Xóa toast khỏi DOM sau khi ẩn
+            toastElement.addEventListener('hidden.bs.toast', function () {
+                $(this).remove();
+            });
+        }
+
+        // Xử lý sao chép giao dịch
+        $('#copyTransfersBtn').click(function () {
+            if ($('#transfersList').children().length === 0 ||
+                $('#transfersList').text().includes('Không cần chuyển tiền')) {
+                showToast('Không có giao dịch nào để sao chép!', 'warning');
+                return;
+            }
+
+            // Tạo nội dung để sao chép
+            let copyContent = `GIAO DỊCH CẦN THỰC HIỆN - ${$('#eventTitle').text()}\n\n`;
+
+            $('#transfersList .transfer-item').each(function () {
+                // Loại bỏ icon và format lại text
+                const transferText = $(this).text().trim().replace('ị ', 'ị: ');
+                copyContent += transferText + '\n';
+            });
+
+            // Copy vào clipboard
+            navigator.clipboard.writeText(copyContent)
+                .then(() => {
+                    showToast('Đã sao chép các giao dịch thành công!', 'success');
+                })
+                .catch(err => {
+                    console.error('Không thể sao chép: ', err);
+                    showToast('Không thể sao chép. Vui lòng thử lại sau!', 'warning');
+                });
+        });
+
+        // Thêm handler cho nút share
+        $('#shareEventBtn').click(function () {
+            if (!currentEventCode) {
+                showToast('Vui lòng lưu sự kiện trước khi chia sẻ!', 'warning');
+                return;
+            }
+
+            // Tạo URL với event_code
+            const shareUrl = window.location.origin + window.location.pathname + '?event_code=' + currentEventCode;
+
+            // Hiển thị modal với link
+            $('#shareLink').val(shareUrl);
+            $('#shareEventModal').modal('show');
+        });
+
+        // Xử lý copy link chia sẻ
+        $('#copyShareLinkBtn').click(function () {
+            const shareLink = $('#shareLink');
+            shareLink.select();
+            document.execCommand('copy');
+            showToast('Đã sao chép đường link thành công!', 'success');
+        });
+
+        $(document).on('click', '.edit-expense', function () {
+            const index = $(this).data('index');
+            const expense = expenses[index];
+
+            // Điền thông tin chi phí vào form
+            $('#expenseTitle').val(expense.title);
+            $('#expenseAmount').val(expense.amount);
+            $('#expensePayer').val(expense.payer);
+            $('#benefitType').val(expense.benefitType || 'all').trigger('change');
+
+            // Nếu là chi tiêu cho một số người, chọn lại các checkbox
+            if (expense.benefitType === 'selected' && expense.beneficiaries) {
+                setTimeout(() => {
+                    expense.beneficiaries.forEach(member => {
+                        $(`#benefit_${member}`).prop('checked', true);
+                    });
+                }, 100);
+            }
+
+            // Xóa chi phí cũ
+            expenses.splice(index, 1);
+            renderExpenses();
+
+            // Cuộn lên form để người dùng có thể chỉnh sửa
+            $('html, body').animate({
+                scrollTop: $("#expenseForm").offset().top - 100
+            }, 500);
+        });
+
+        // Hàm kiểm tra và tải dữ liệu từ URL khi trang được load (đã được xử lý ở đầu)
+        function checkForSharedData() {
+            // Đã được xử lý ở đầu file
+        }
+
+        // Hàm hiển thị option ngân hàng có logo
+        function formatBankOption(option) {
+            if (!option.id) return option.text; // placeholder không có logo
+            var img = $(option.element).data('image');
+            if (img) {
+                return $(`<span><img src="${img}" /> ${option.text}</span>`);
+            }
+            return option.text;
+        }
+
+        // Khi mở modal Thêm/Sửa Thông Tin Ngân Hàng thì reset lại select2 để tránh lỗi
+        $('#editBankInfoModal').on('shown.bs.modal', function () {
+            $('#bankInfoBank').select2({
+                dropdownParent: $('#editBankInfoModal'),
+                templateResult: formatBankOption,
+                templateSelection: formatBankOption,
+                width: '100%'
+            });
+        });
+    });
+</script>
+</body>
+</html>
