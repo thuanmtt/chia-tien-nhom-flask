@@ -59,8 +59,10 @@ chia-tien-nhom-flask/
 
 ### Events
 - `POST /api/events` - Tạo sự kiện mới
+- `GET /api/events` - Lấy danh sách tất cả sự kiện
 - `GET /api/events/<event_code>` - Lấy thông tin sự kiện
 - `PUT /api/events/<event_code>` - Cập nhật sự kiện
+- `DELETE /api/events/<event_code>` - Xóa sự kiện
 
 ### Banks
 - `GET /api/banks` - Lấy danh sách ngân hàng
@@ -83,6 +85,12 @@ chia-tien-nhom-flask/
 1. Mở link chia sẻ
 2. Dữ liệu sự kiện sẽ được tải tự động
 3. Có thể thêm chi phí và cập nhật thông tin
+
+### Xem sự kiện đã lưu
+1. Nhấn "Sự Kiện Đã Lưu" trên thanh navigation
+2. Xem danh sách tất cả sự kiện đã tạo
+3. Click vào sự kiện để mở và chỉnh sửa
+4. Sử dụng nút chia sẻ hoặc xóa cho từng sự kiện
 
 ## Event Code Format
 

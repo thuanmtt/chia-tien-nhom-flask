@@ -836,10 +836,63 @@
             }
         }
 
-        // Hàm hiển thị danh sách sự kiện đã lưu (tạm thời ẩn chức năng này)
+        // Hàm hiển thị danh sách sự kiện đã lưu
         function renderSavedEvents() {
             $('#savedEventsList').empty();
-            $('#savedEventsList').append('<p class="text-center text-muted">Chức năng này đang được phát triển.</p>');
+            $('#savedEventsList').append('<p class="text-center text-muted">Đang tải...</p>');
+            
+            $.ajax({
+                url: '/api/events',
+                method: 'GET',
+                success: function(response) {
+                    if (response.success) {
+                        const events = response.events;
+                        $('#savedEventsList').empty();
+                        
+                        if (events.length === 0) {
+                            $('#savedEventsList').append('<p class="text-center text-muted">Chưa có sự kiện nào được lưu.</p>');
+                            return;
+                        }
+                        
+                        events.forEach(function(event) {
+                            const date = new Date(event.updated_at).toLocaleDateString('vi-VN');
+                            const time = new Date(event.updated_at).toLocaleTimeString('vi-VN', {hour: '2-digit', minute: '2-digit'});
+                            
+                            $('#savedEventsList').append(`
+                                <div class="list-group-item list-group-item-action event-item" data-event-code="${event.event_code}">
+                                    <div class="d-flex w-100 justify-content-between">
+                                        <h5 class="mb-1">${event.title}</h5>
+                                        <small class="text-muted">${date} ${time}</small>
+                                    </div>
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <p class="mb-1">Số thành viên: ${event.members_count}</p>
+                                            <p class="mb-1">Số chi phí: ${event.expenses_count}</p>
+                                            <p class="mb-1">Tổng chi phí: ${formatCurrency(event.total_expense)}</p>
+                                            <small class="text-muted">Mã: ${event.event_code}</small>
+                                        </div>
+                                        <div>
+                                            <button class="btn btn-sm btn-outline-primary me-1 share-event-btn" data-event-code="${event.event_code}">
+                                                <i class="fas fa-share-alt"></i>
+                                            </button>
+                                            <button class="btn btn-sm btn-danger delete-event-btn" data-event-code="${event.event_code}">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            `);
+                        });
+                    } else {
+                        $('#savedEventsList').empty();
+                        $('#savedEventsList').append('<p class="text-center text-danger">Lỗi khi tải danh sách sự kiện!</p>');
+                    }
+                },
+                error: function() {
+                    $('#savedEventsList').empty();
+                    $('#savedEventsList').append('<p class="text-center text-danger">Lỗi kết nối server!</p>');
+                }
+            });
         }
 
         // Thuật toán chia tiền
@@ -1177,14 +1230,62 @@
             renderSavedEvents();
         });
 
-        // Xử lý khi chọn sự kiện đã lưu (tạm thời ẩn)
+        // Xử lý khi chọn sự kiện đã lưu
         $(document).on('click', '.event-item', function (e) {
-            // Tạm thời ẩn chức năng này
+            // Không chọn sự kiện nếu click vào nút xoá hoặc share
+            if ($(e.target).hasClass('delete-event-btn') || $(e.target).closest('.delete-event-btn').length ||
+                $(e.target).hasClass('share-event-btn') || $(e.target).closest('.share-event-btn').length) {
+                return;
+            }
+
+            const eventCode = $(this).data('event-code');
+            loadEventFromServer(eventCode);
+            $('#savedEventsModal').modal('hide');
         });
 
-        // Xử lý xoá sự kiện (tạm thời ẩn)
+        // Xử lý xoá sự kiện
         $(document).on('click', '.delete-event-btn', function (e) {
-            // Tạm thời ẩn chức năng này
+            e.stopPropagation(); // Ngăn không cho sự kiện propagate lên parent
+            const eventCode = $(this).data('event-code');
+            
+            if (confirm('Bạn có chắc chắn muốn xoá sự kiện này?')) {
+                $.ajax({
+                    url: `/api/events/${eventCode}`,
+                    method: 'DELETE',
+                    success: function(response) {
+                        if (response.success) {
+                            showToast('Đã xoá sự kiện thành công!', 'success');
+                            
+                            // Nếu đang xoá sự kiện hiện tại, tạo mới
+                            if (eventCode === currentEventCode) {
+                                createNewEvent();
+                                localStorage.removeItem('currentEventCode');
+                            }
+                            
+                            // Cập nhật danh sách sự kiện
+                            renderSavedEvents();
+                        } else {
+                            showToast('Lỗi khi xoá sự kiện!', 'error');
+                        }
+                    },
+                    error: function() {
+                        showToast('Lỗi kết nối server!', 'error');
+                    }
+                });
+            }
+        });
+
+        // Xử lý chia sẻ sự kiện từ danh sách
+        $(document).on('click', '.share-event-btn', function (e) {
+            e.stopPropagation(); // Ngăn không cho sự kiện propagate lên parent
+            const eventCode = $(this).data('event-code');
+            
+            // Tạo URL với event_code
+            const shareUrl = window.location.origin + window.location.pathname + '?event_code=' + eventCode;
+
+            // Hiển thị modal với link
+            $('#shareLink').val(shareUrl);
+            $('#shareEventModal').modal('show');
         });
 
         // Xử lý tạo sự kiện mới

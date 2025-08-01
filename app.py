@@ -166,6 +166,68 @@ def get_banks():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/events', methods=['GET'])
+def get_all_events():
+    """Lấy danh sách tất cả sự kiện"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT id, event_code, title, members, expenses, created_at, updated_at
+            FROM events 
+            ORDER BY updated_at DESC
+        ''')
+        
+        events = cursor.fetchall()
+        conn.close()
+        
+        events_list = []
+        for event in events:
+            members = json.loads(event['members'])
+            expenses = json.loads(event['expenses'])
+            total_expense = sum(expense.get('amount', 0) for expense in expenses)
+            
+            events_list.append({
+                'id': event['id'],
+                'event_code': event['event_code'],
+                'title': event['title'],
+                'members_count': len(members),
+                'expenses_count': len(expenses),
+                'total_expense': total_expense,
+                'created_at': event['created_at'],
+                'updated_at': event['updated_at']
+            })
+        
+        return jsonify({
+            'success': True,
+            'events': events_list
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/events/<event_code>', methods=['DELETE'])
+def delete_event(event_code):
+    """Xóa sự kiện"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM events WHERE event_code = ?', (event_code,))
+        
+        if cursor.rowcount == 0:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Event not found'}), 404
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/event/<event_code>')
 def view_event(event_code):
     """Trang xem sự kiện với event_code"""

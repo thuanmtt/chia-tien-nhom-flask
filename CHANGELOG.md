@@ -10,6 +10,9 @@
 - ✅ Chia sẻ sự kiện qua event_code thay vì data URL
 - ✅ LocalStorage chỉ lưu event_code
 - ✅ Tự động tải dữ liệu khi có event_code trong URL
+- ✅ Tính năng xem danh sách sự kiện đã lưu
+- ✅ Chức năng xóa sự kiện
+- ✅ Chia sẻ sự kiện trực tiếp từ danh sách
 
 ### Thay đổi
 - 🔄 Thay đổi từ localStorage sang SQLite database
@@ -31,8 +34,10 @@ chia-tien-nhom-flask/
 
 ### API Endpoints
 - `POST /api/events` - Tạo sự kiện mới
+- `GET /api/events` - Lấy danh sách tất cả sự kiện
 - `GET /api/events/<event_code>` - Lấy thông tin sự kiện
 - `PUT /api/events/<event_code>` - Cập nhật sự kiện
+- `DELETE /api/events/<event_code>` - Xóa sự kiện
 - `GET /api/banks` - Lấy danh sách ngân hàng
 
 ### Database Schema
