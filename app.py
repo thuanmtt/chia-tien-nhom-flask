@@ -10,7 +10,8 @@ import uuid
 app = Flask(__name__)
 
 # Cấu hình database
-DATABASE = 'events.db'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATABASE = os.path.join(BASE_DIR, 'events.db')
 
 def init_db():
     """Khởi tạo database và tạo bảng"""
@@ -160,7 +161,8 @@ def update_event(event_code):
 def get_banks():
     """Lấy danh sách ngân hàng"""
     try:
-        with open('static/banks.json', 'r', encoding='utf-8') as f:
+        banks_path = os.path.join(BASE_DIR, 'static', 'banks.json')
+        with open(banks_path, 'r', encoding='utf-8') as f:
             banks_data = json.load(f)
         return jsonify(banks_data)
     except Exception as e:
