@@ -231,8 +231,21 @@
                                 </div>
                                 <div class="col-md-6">
                                     <label for="expenseAmount" class="form-label">Số tiền (VND)</label>
-                                    <input type="number" class="form-control" id="expenseAmount" name="expenseAmount"
-                                           placeholder="Nhập số tiền...">
+                                    <div class="input-group">
+                                        <input type="number" class="form-control" id="expenseAmount" name="expenseAmount"
+                                               placeholder="Nhập số tiền...">
+                                        <div class="input-group-text">
+                                            <div class="form-check mb-0">
+                                                <input class="form-check-input" type="checkbox" id="addZerosCheckbox" checked>
+                                                <label class="form-check-label" for="addZerosCheckbox" style="font-size: 0.875rem;">
+                                                    K
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="form-text" id="amountPreview">
+                                        Số tiền sẽ lưu: <span class="text-muted">0 VND</span>
+                                    </div>
                                 </div>
                             </div>
                             <div class="row g-3 mb-3">
@@ -666,6 +679,39 @@
         function formatCurrency(amount) {
             return new Intl.NumberFormat('vi-VN').format(amount) + ' VND';
         }
+
+        // Hàm cập nhật preview số tiền sẽ lưu
+        function updateAmountPreview() {
+            const amountInput = $('#expenseAmount');
+            const checkbox = $('#addZerosCheckbox');
+            const previewSpan = $('#amountPreview span');
+            
+            let amount = amountInput.val().trim();
+            
+            if (amount && !isNaN(amount)) {
+                // Nếu checkbox được tick, thêm 3 số 0
+                if (checkbox.is(':checked')) {
+                    if (!amount.endsWith('000')) {
+                        amount = amount + '000';
+                    }
+                }
+                
+                const formattedAmount = formatCurrency(parseFloat(amount));
+                previewSpan.text(formattedAmount);
+            } else {
+                previewSpan.text('0 VND');
+            }
+        }
+
+        // Xử lý khi nhập số tiền - cập nhật preview
+        $('#expenseAmount').on('input', function() {
+            updateAmountPreview();
+        });
+
+        // Xử lý khi thay đổi checkbox - cập nhật preview
+        $('#addZerosCheckbox').change(function() {
+            updateAmountPreview();
+        });
 
         // Hàm tạo sự kiện mới
         function createNewEvent() {
@@ -1202,13 +1248,19 @@
         $('#expenseForm').submit(function (e) {
             e.preventDefault();
             const title = $('#expenseTitle').val().trim();
-            const amount = $('#expenseAmount').val().trim();
+            let amount = $('#expenseAmount').val().trim();
             const payer = $('#expensePayer').val();
             const benefitType = $('#benefitType').val();
 
             if (!title) {
                 showToast('Vui lòng nhập mục chi tiêu!', 'warning');
                 return;
+            }
+
+            // Xử lý số tiền dựa trên checkbox
+            if ($('#addZerosCheckbox').is(':checked')) {
+                // Nếu checkbox được tick, thêm 3 số 0 vào cuối
+                amount = amount + '000';
             }
 
             if (!amount || isNaN(amount) || parseFloat(amount) <= 0) {
@@ -1255,6 +1307,9 @@
             $('#expenseAmount').val('');
             $('#expensePayer').val('');
             $('#benefitType').val('all').trigger('change');
+            
+            // Cập nhật preview sau khi reset
+            updateAmountPreview();
 
             // Tự động lưu sau khi thêm chi phí
             saveEvent(false);
@@ -1479,6 +1534,19 @@
             $('#expenseAmount').val(expense.amount);
             $('#expensePayer').val(expense.payer);
             $('#benefitType').val(expense.benefitType || 'all').trigger('change');
+
+            // Xử lý checkbox thêm 3 số 0 khi edit
+            const amount = expense.amount.toString();
+            if (amount.endsWith('000')) {
+                $('#addZerosCheckbox').prop('checked', true);
+                $('#expenseAmount').val(amount.slice(0, -3));
+            } else {
+                $('#addZerosCheckbox').prop('checked', false);
+                $('#expenseAmount').val(amount);
+            }
+            
+            // Cập nhật preview sau khi set giá trị
+            updateAmountPreview();
 
             // Nếu là chi tiêu cho một số người, chọn lại các checkbox
             if (expense.benefitType === 'selected' && expense.beneficiaries) {
