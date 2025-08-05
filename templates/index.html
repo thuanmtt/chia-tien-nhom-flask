@@ -286,7 +286,15 @@
                         </form>
                     </div>
                     <div class="expenses-list mt-4">
-                        <h6 class="mb-3">Danh sách chi phí</h6>
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="mb-0">Danh sách chi phí</h6>
+                            <div class="btn-group" role="group">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" id="sortExpensesBtn" title="Sắp xếp danh sách">
+                                    <i class="fas fa-sort-down me-1"></i>
+                                    <span id="sortText">Mới nhất</span>
+                                </button>
+                            </div>
+                        </div>
                         <div id="expensesList"></div>
                     </div>
                 </div>
@@ -498,6 +506,7 @@
         let members = [];
         let expenses = [];
         let bankInfo = {};
+        let sortOrder = 'newest'; // 'newest' hoặc 'oldest'
 
         // Kiểm tra xem có event_code trong URL không
         const urlParams = new URLSearchParams(window.location.search);
@@ -851,6 +860,17 @@
             autoCalculate();
         }
 
+        // Hàm sắp xếp danh sách chi phí
+        function sortExpenses() {
+            if (sortOrder === 'newest') {
+                // Sắp xếp theo thứ tự mới nhất (đảo ngược)
+                return [...expenses].reverse();
+            } else {
+                // Sắp xếp theo thứ tự cũ nhất (giữ nguyên thứ tự hiện tại)
+                return [...expenses];
+            }
+        }
+
         // Hàm hiển thị danh sách chi phí
         function renderExpenses() {
             $('#expensesList').empty();
@@ -861,7 +881,12 @@
                 return;
             }
 
-            expenses.forEach(function (expense, index) {
+            // Sắp xếp danh sách chi phí theo thứ tự hiện tại
+            const sortedExpenses = sortExpenses();
+
+            sortedExpenses.forEach(function (expense, originalIndex) {
+                // Tìm index gốc trong mảng expenses
+                const index = expenses.indexOf(expense);
                 let benefitInfo = '';
                 if (expense.benefitType === 'all') {
                     benefitInfo = 'cho tất cả mọi người';
@@ -1324,6 +1349,22 @@
             // Tự động lưu sau khi xóa chi phí
             saveEvent(false);
             // Không cần gọi autoCalculate() vì đã được gọi trong renderExpenses()
+        });
+
+        // Xử lý nút sắp xếp danh sách chi phí
+        $('#sortExpensesBtn').click(function () {
+            // Đảo ngược thứ tự sắp xếp
+            sortOrder = sortOrder === 'newest' ? 'oldest' : 'newest';
+            
+            // Cập nhật text hiển thị
+            $('#sortText').text(sortOrder === 'newest' ? 'Mới nhất' : 'Cũ nhất');
+            
+            // Cập nhật icon
+            const icon = sortOrder === 'newest' ? 'fa-sort-down' : 'fa-sort-up';
+            $('#sortExpensesBtn i').removeClass('fa-sort fa-sort-up fa-sort-down').addClass(icon);
+            
+            // Render lại danh sách chi phí
+            renderExpenses();
         });
 
         // Vẫn giữ nút tính toán cho trường hợp người dùng muốn tính lại
