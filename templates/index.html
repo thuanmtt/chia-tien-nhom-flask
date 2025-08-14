@@ -375,15 +375,31 @@
             </div>
             <div class="modal-body">
                 <p>Sử dụng đường link dưới đây để chia sẻ thông tin sự kiện:</p>
-                <div class="input-group mb-3">
-                    <input type="text" class="form-control" id="shareLink" readonly>
-                    <button class="btn btn-primary" id="copyShareLinkBtn">
-                        <i class="fas fa-copy me-1"></i> Copy
-                    </button>
+                
+                <div class="mb-3">
+                    <label class="form-label"><strong>Link chỉ xem (ẩn các nút chỉnh sửa):</strong></label>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="shareLinkViewOnly" readonly>
+                        <button class="btn btn-primary" id="copyShareLinkViewOnlyBtn">
+                            <i class="fas fa-copy me-1"></i> Copy
+                        </button>
+                    </div>
                 </div>
+                
+                <div class="mb-3">
+                    <label class="form-label"><strong>Link có thể chỉnh sửa:</strong></label>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="shareLinkEditable" readonly>
+                        <button class="btn btn-primary" id="copyShareLinkEditableBtn">
+                            <i class="fas fa-copy me-1"></i> Copy
+                        </button>
+                    </div>
+                </div>
+                
                 <div class="alert alert-info mt-3">
-                    <i class="fas fa-info-circle me-2"></i> Link này chứa tất cả thông tin về sự kiện, bao gồm danh sách
-                    thành viên, chi phí và thông tin ngân hàng.
+                    <i class="fas fa-info-circle me-2"></i> 
+                    <strong>Link chỉ xem:</strong> Người nhận chỉ có thể xem thông tin, không thể chỉnh sửa.<br>
+                    <strong>Link có thể chỉnh sửa:</strong> Người nhận có thể chỉnh sửa và lưu thay đổi.
                 </div>
             </div>
             <div class="modal-footer">
@@ -507,12 +523,30 @@
         let expenses = [];
         let bankInfo = {};
         let sortOrder = 'newest'; // 'newest' hoặc 'oldest'
+        let allowEdit = true; // Mặc định cho phép sửa
 
         // Kiểm tra xem có event_code trong URL không
         const urlParams = new URLSearchParams(window.location.search);
         const urlEventCode = urlParams.get('event_code');
+        const urlAllowEdit = urlParams.get('allow_edit');
         
-        if (urlEventCode) {
+        // Kiểm tra route share (chỉ xem)
+        if (window.location.pathname.startsWith('/share/')) {
+            allowEdit = false;
+            // Lấy event_code từ path
+            const pathParts = window.location.pathname.split('/');
+            if (pathParts.length >= 3) {
+                currentEventCode = pathParts[2];
+                loadEventFromServer(currentEventCode);
+            }
+        } else if (urlEventCode) {
+            // Kiểm tra params allow_edit
+            if (urlAllowEdit === 'true') {
+                allowEdit = true;
+            } else if (urlAllowEdit === 'false') {
+                allowEdit = false;
+            }
+            
             currentEventCode = urlEventCode;
             localStorage.setItem('currentEventCode', currentEventCode);
             saveEventCodeToLocalStorage(currentEventCode); // Lưu event_code vào localStorage
@@ -523,6 +557,61 @@
         } else {
             // Tạo sự kiện mới
             createNewEvent();
+        }
+
+        // Ẩn/hiện các nút dựa trên allowEdit
+        function updateUIForEditMode() {
+            if (!allowEdit) {
+                // Ẩn các nút và form chỉnh sửa
+                $('#newEventBtn').hide();
+                $('#savedEventsBtn').hide();
+                $('#configBankInfoBtn').hide();
+                $('#saveEventBtn').hide();
+                $('#shareEventBtn').hide();
+                $('#memberForm').hide();
+                $('#expenseForm').hide();
+                $('#calculateBtn').hide();
+                $('#eventTitle').removeAttr('contenteditable');
+                $('#eventTitle').css('cursor', 'default');
+                
+                // Ẩn các nút action trong danh sách thành viên và chi phí
+                $('.member-close').hide();
+                $('.action-btn').hide();
+                
+                // Ẩn nút copy trong kết quả
+                $('#copyTransfersBtn').hide();
+                
+                // Thay đổi tiêu đề navbar
+                $('.navbar-brand').html('<i class="fas fa-eye me-2"></i>Xem Sự Kiện (Chế Độ Chỉ Xem)');
+                
+                // Ẩn footer
+                $('footer').hide();
+            } else {
+                // Hiện lại tất cả các nút và form
+                $('#newEventBtn').show();
+                $('#savedEventsBtn').show();
+                $('#configBankInfoBtn').show();
+                $('#saveEventBtn').show();
+                $('#shareEventBtn').show();
+                $('#memberForm').show();
+                $('#expenseForm').show();
+                $('#calculateBtn').show();
+                $('#eventTitle').attr('contenteditable', 'true');
+                $('#eventTitle').css('cursor', 'text');
+                
+                // Hiện lại các nút action
+                $('.member-close').show();
+                $('.action-btn').show();
+                
+                // Hiện lại nút copy
+                $('#copyTransfersBtn').show();
+                
+                // Khôi phục tiêu đề navbar
+                $('.navbar-brand').html('<i class="fas fa-money-bill-wave me-2"></i>Ứng Dụng Chia Tiền Nhóm');
+                
+                // Hiện lại footer
+                $('footer').show();
+            }
         }
 
         // Load danh sách ngân hàng
@@ -586,12 +675,16 @@
 
         // Xử lý khi bấm nút cấu hình ngân hàng
         $('#configBankInfoBtn').click(function () {
+            if (!allowEdit) return; // Không cho phép cấu hình nếu ở chế độ chỉ xem
+            
             renderBankInfoTable();
             $('#bankInfoModal').modal('show');
         });
 
         // Xử lý khi bấm nút thêm thông tin ngân hàng
         $('#addBankInfoBtn').click(function () {
+            if (!allowEdit) return; // Không cho phép thêm nếu ở chế độ chỉ xem
+            
             updateBankInfoMembers();
             $('#bankInfoMember').val('');
             $('#bankInfoBank').val('');
@@ -601,6 +694,8 @@
 
         // Xử lý khi bấm nút sửa thông tin ngân hàng
         $(document).on('click', '.edit-bank-info', function () {
+            if (!allowEdit) return; // Không cho phép sửa nếu ở chế độ chỉ xem
+            
             const member = $(this).data('member');
             const info = bankInfo[member] || {};
 
@@ -614,6 +709,8 @@
 
         // Xử lý khi bấm nút xóa thông tin ngân hàng
         $(document).on('click', '.delete-bank-info', function () {
+            if (!allowEdit) return; // Không cho phép xóa nếu ở chế độ chỉ xem
+            
             const member = $(this).data('member');
             if (confirm(`Bạn có chắc chắn muốn xóa thông tin ngân hàng của ${member}?`)) {
                 delete bankInfo[member];
@@ -625,6 +722,8 @@
 
         // Xử lý khi chọn thành viên trong modal thêm/sửa
         $('#bankInfoMember').change(function () {
+            if (!allowEdit) return; // Không cho phép thay đổi nếu ở chế độ chỉ xem
+            
             const member = $(this).val();
             if (member && bankInfo[member]) {
                 $('#bankInfoBank').val(bankInfo[member].bank);
@@ -637,6 +736,8 @@
 
         // Xử lý khi lưu thông tin ngân hàng
         $('#saveBankInfoBtn').click(function () {
+            if (!allowEdit) return; // Không cho phép lưu nếu ở chế độ chỉ xem
+            
             const member = $('#bankInfoMember').val();
             const bank = $('#bankInfoBank').val();
             const account = $('#bankInfoAccount').val();
@@ -675,6 +776,8 @@
 
         // Xử lý khi bấm nút tải ảnh QR
         $('#downloadQrBtn').click(function () {
+            if (!allowEdit) return; // Không cho phép tải nếu ở chế độ chỉ xem
+            
             const qrUrl = $('#qrCodeImage').attr('src');
             const link = document.createElement('a');
             link.href = qrUrl;
@@ -714,11 +817,15 @@
 
         // Xử lý khi nhập số tiền - cập nhật preview
         $('#expenseAmount').on('input', function() {
+            if (!allowEdit) return; // Không cho phép nhập nếu ở chế độ chỉ xem
+            
             updateAmountPreview();
         });
 
         // Xử lý khi thay đổi checkbox - cập nhật preview
         $('#addZerosCheckbox').change(function() {
+            if (!allowEdit) return; // Không cho phép thay đổi nếu ở chế độ chỉ xem
+            
             updateAmountPreview();
         });
 
@@ -732,10 +839,15 @@
             renderMembers();
             renderExpenses();
             $('#resultContainer').hide();
+            
+            // Cập nhật UI dựa trên chế độ chỉnh sửa
+            updateUIForEditMode();
         }
 
         // Hàm lưu dữ liệu vào server
         function saveEvent(showAlert = true) {
+            if (!allowEdit) return; // Không cho phép lưu nếu ở chế độ chỉ xem
+            
             if (members.length === 0 && showAlert) {
                 showToast('Vui lòng thêm ít nhất một thành viên trước khi lưu!', 'warning');
                 return;
@@ -827,6 +939,9 @@
 
                         // Tự động tính toán khi tải sự kiện
                         calculateSplit(false);
+                        
+                        // Cập nhật UI dựa trên chế độ chỉnh sửa
+                        updateUIForEditMode();
                     } else {
                         showToast('Không tìm thấy sự kiện!', 'error');
                         createNewEvent();
@@ -849,7 +964,7 @@
                 $('#membersList').append(`
                 <div class="member-pill">
                     ${member}
-                    <span class="member-close" data-index="${index}"><i class="fas fa-times"></i></span>
+                    <span class="member-close" data-index="${index}" style="${!allowEdit ? 'display: none;' : ''}"><i class="fas fa-times"></i></span>
                 </div>
             `);
 
@@ -911,7 +1026,7 @@
                         <small>${expense.payer} đã thanh toán ${formatCurrency(expense.amount)} ${benefitInfo}</small>
                     </p>
                 </div>
-                <div>
+                <div style="${!allowEdit ? 'display: none;' : ''}">
                     <span class="action-btn edit-expense" data-index="${index}">
                         <i class="fas fa-edit"></i>
                     </span>
@@ -1207,6 +1322,8 @@
 
         // Hiển thị hoặc ẩn danh sách người hưởng lợi dựa vào loại hưởng lợi
         $('#benefitType').change(function () {
+            if (!allowEdit) return; // Không cho phép thay đổi nếu ở chế độ chỉ xem
+            
             if ($(this).val() === 'selected') {
                 $('#beneficiariesContainer').show();
                 renderBeneficiaries();
@@ -1218,6 +1335,8 @@
 
         // Xử lý khi bấm nút "Chọn tất cả"
         $('#selectAllBeneficiaries').click(function () {
+            if (!allowEdit) return; // Không cho phép chọn nếu ở chế độ chỉ xem
+            
             const allChecked = $('.beneficiary-checkbox').length === $('.beneficiary-checkbox:checked').length;
             $('.beneficiary-checkbox').prop('checked', !allChecked);
         });
@@ -1226,6 +1345,8 @@
         // Xử lý thêm thành viên
         $('#memberForm').submit(function (e) {
             e.preventDefault();
+            if (!allowEdit) return; // Không cho phép thêm nếu ở chế độ chỉ xem
+            
             const memberName = $('#memberName').val().trim();
 
             if (memberName) {
@@ -1247,6 +1368,8 @@
 
         // Xử lý xóa thành viên
         $(document).on('click', '.member-close', function () {
+            if (!allowEdit) return; // Không cho phép xóa nếu ở chế độ chỉ xem
+            
             const index = $(this).data('index');
             const memberToRemove = members[index];
 
@@ -1272,6 +1395,8 @@
         // Xử lý thêm chi phí
         $('#expenseForm').submit(function (e) {
             e.preventDefault();
+            if (!allowEdit) return; // Không cho phép thêm nếu ở chế độ chỉ xem
+            
             const title = $('#expenseTitle').val().trim();
             let amount = $('#expenseAmount').val().trim();
             const payer = $('#expensePayer').val();
@@ -1342,6 +1467,8 @@
 
         // Xử lý xóa chi phí
         $(document).on('click', '.delete-expense', function () {
+            if (!allowEdit) return; // Không cho phép xóa nếu ở chế độ chỉ xem
+            
             const index = $(this).data('index');
             expenses.splice(index, 1);
             renderExpenses();
@@ -1353,6 +1480,8 @@
 
         // Xử lý nút sắp xếp danh sách chi phí
         $('#sortExpensesBtn').click(function () {
+            if (!allowEdit) return; // Không cho phép sắp xếp nếu ở chế độ chỉ xem
+            
             // Đảo ngược thứ tự sắp xếp
             sortOrder = sortOrder === 'newest' ? 'oldest' : 'newest';
             
@@ -1369,16 +1498,22 @@
 
         // Vẫn giữ nút tính toán cho trường hợp người dùng muốn tính lại
         $('#calculateBtn').click(function () {
+            if (!allowEdit) return; // Không cho phép tính toán nếu ở chế độ chỉ xem
+            
             calculateSplit(true); // Hiển thị thông báo lỗi nếu có
         });
 
         // Xử lý lưu sự kiện (hiện thông báo)
         $('#saveEventBtn').click(function () {
+            if (!allowEdit) return; // Không cho phép lưu nếu ở chế độ chỉ xem
+            
             saveEvent(true);
         });
 
         // Xử lý khi người dùng chỉnh sửa tên sự kiện
         $('#eventTitle').on('blur', function () {
+            if (!allowEdit) return; // Không cho phép chỉnh sửa nếu ở chế độ chỉ xem
+            
             const newTitle = $(this).text().trim();
             if (newTitle) {
                 // Lưu tên sự kiện mới
@@ -1391,6 +1526,8 @@
 
         // Xử lý khi người dùng nhấn Enter để kết thúc chỉnh sửa
         $('#eventTitle').on('keypress', function (e) {
+            if (!allowEdit) return; // Không cho phép chỉnh sửa nếu ở chế độ chỉ xem
+            
             if (e.which === 13) { // 13 là mã phím Enter
                 e.preventDefault(); // Ngăn không cho xuống dòng
                 $(this).blur(); // Kích hoạt sự kiện blur để lưu tên
@@ -1455,16 +1592,22 @@
             e.stopPropagation(); // Ngăn không cho sự kiện propagate lên parent
             const eventCode = $(this).data('event-code');
             
-            // Tạo URL với event_code
-            const shareUrl = window.location.origin + window.location.pathname + '?event_code=' + eventCode;
+            // Tạo URL chỉ xem
+            const shareUrlViewOnly = window.location.origin + '/share/' + eventCode;
+            
+            // Tạo URL có thể chỉnh sửa
+            const shareUrlEditable = window.location.origin + window.location.pathname + '?event_code=' + eventCode + '&allow_edit=true';
 
-            // Hiển thị modal với link
-            $('#shareLink').val(shareUrl);
+            // Hiển thị modal với 2 loại link
+            $('#shareLinkViewOnly').val(shareUrlViewOnly);
+            $('#shareLinkEditable').val(shareUrlEditable);
             $('#shareEventModal').modal('show');
         });
 
         // Xử lý tạo sự kiện mới
         $('#newEventBtn').click(function () {
+            if (!allowEdit) return; // Không cho phép tạo mới nếu ở chế độ chỉ xem
+            
             if (confirm('Bạn có chắc chắn muốn tạo sự kiện mới? Dữ liệu hiện tại đã được lưu.')) {
                 createNewEvent();
                 localStorage.removeItem('currentEventCode');
@@ -1517,6 +1660,8 @@
 
         // Xử lý sao chép giao dịch
         $('#copyTransfersBtn').click(function () {
+            if (!allowEdit) return; // Không cho phép copy nếu ở chế độ chỉ xem
+            
             if ($('#transfersList').children().length === 0 ||
                 $('#transfersList').text().includes('Không cần chuyển tiền')) {
                 showToast('Không có giao dịch nào để sao chép!', 'warning');
@@ -1550,23 +1695,37 @@
                 return;
             }
 
-            // Tạo URL với event_code
-            const shareUrl = window.location.origin + window.location.pathname + '?event_code=' + currentEventCode;
+            // Tạo URL chỉ xem
+            const shareUrlViewOnly = window.location.origin + '/share/' + currentEventCode;
+            
+            // Tạo URL có thể chỉnh sửa
+            const shareUrlEditable = window.location.origin + window.location.pathname + '?event_code=' + currentEventCode + '&allow_edit=true';
 
-            // Hiển thị modal với link
-            $('#shareLink').val(shareUrl);
+            // Hiển thị modal với 2 loại link
+            $('#shareLinkViewOnly').val(shareUrlViewOnly);
+            $('#shareLinkEditable').val(shareUrlEditable);
             $('#shareEventModal').modal('show');
         });
 
-        // Xử lý copy link chia sẻ
-        $('#copyShareLinkBtn').click(function () {
-            const shareLink = $('#shareLink');
+        // Xử lý copy link chỉ xem
+        $('#copyShareLinkViewOnlyBtn').click(function () {
+            const shareLink = $('#shareLinkViewOnly');
             shareLink.select();
             document.execCommand('copy');
-            showToast('Đã sao chép đường link thành công!', 'success');
+            showToast('Đã sao chép link chỉ xem thành công!', 'success');
+        });
+
+        // Xử lý copy link có thể chỉnh sửa
+        $('#copyShareLinkEditableBtn').click(function () {
+            const shareLink = $('#shareLinkEditable');
+            shareLink.select();
+            document.execCommand('copy');
+            showToast('Đã sao chép link có thể chỉnh sửa thành công!', 'success');
         });
 
         $(document).on('click', '.edit-expense', function () {
+            if (!allowEdit) return; // Không cho phép chỉnh sửa nếu ở chế độ chỉ xem
+            
             const index = $(this).data('index');
             const expense = expenses[index];
 
@@ -1580,7 +1739,7 @@
             const amount = expense.amount.toString();
             if (amount.endsWith('000')) {
                 $('#addZerosCheckbox').prop('checked', true);
-                $('#expenseAmount').val(amount.slice(0, -3));
+                $('#expenseAmount').val(amount);
             } else {
                 $('#addZerosCheckbox').prop('checked', false);
                 $('#expenseAmount').val(amount);
@@ -1632,6 +1791,9 @@
                 width: '100%'
             });
         });
+        
+        // Cập nhật UI ngay sau khi khởi tạo
+        updateUIForEditMode();
     });
 </script>
 </body>

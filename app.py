@@ -235,6 +235,11 @@ def view_event(event_code):
     """Trang xem sự kiện với event_code"""
     return render_template('index.html', event_code=event_code)
 
+@app.route('/share/<event_code>')
+def share_event(event_code):
+    """Trang chia sẻ sự kiện (chỉ xem)"""
+    return render_template('index.html', event_code=event_code, allow_edit=False)
+
 if __name__ == '__main__':
     init_db()
     app.run(debug=True, host='0.0.0.0', port=5001) 
