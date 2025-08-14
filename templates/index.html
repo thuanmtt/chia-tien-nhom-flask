@@ -803,9 +803,7 @@
             if (amount && !isNaN(amount)) {
                 // Nếu checkbox được tick, thêm 3 số 0
                 if (checkbox.is(':checked')) {
-                    if (!amount.endsWith('000')) {
-                        amount = amount + '000';
-                    }
+                    amount = amount + '000';
                 }
                 
                 const formattedAmount = formatCurrency(parseFloat(amount));
