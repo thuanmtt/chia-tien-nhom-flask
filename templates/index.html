@@ -828,8 +828,10 @@
 
         // Hàm tạo sự kiện mới
         function createNewEvent() {
+            localStorage.removeItem('currentEventCode');
             currentEventCode = null;
             $('#eventTitle').text('Sự Kiện Mới');
+            $('#eventCodeDisplay').text('');
             members = [];
             expenses = [];
             bankInfo = {};
@@ -884,6 +886,7 @@
                         if (response.success) {
                             currentEventCode = response.event_code;
                             localStorage.setItem('currentEventCode', currentEventCode);
+                            $('#eventCodeDisplay').text(currentEventCode);
                             saveEventCodeToLocalStorage(currentEventCode); // Lưu event_code vào localStorage
                             if (showAlert) {
                                 showToast('Sự kiện đã được tạo thành công và thêm vào danh sách của bạn!', 'success');
@@ -1566,7 +1569,6 @@
                             // Nếu đang xoá sự kiện hiện tại, tạo mới
                             if (eventCode === currentEventCode) {
                                 createNewEvent();
-                                localStorage.removeItem('currentEventCode');
                             }
                             
                             // Cập nhật danh sách sự kiện
@@ -1609,7 +1611,6 @@
             }
             if (confirm('Bạn có chắc chắn muốn tạo sự kiện mới? Dữ liệu hiện tại đã được lưu.')) {
                 createNewEvent();
-                localStorage.removeItem('currentEventCode');
             }
         });
 
