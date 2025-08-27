@@ -563,7 +563,6 @@
         function updateUIForEditMode() {
             if (!allowEdit) {
                 // Ẩn các nút và form chỉnh sửa
-                $('#newEventBtn').hide();
                 $('#savedEventsBtn').hide();
                 $('#configBankInfoBtn').hide();
                 $('#saveEventBtn').hide();
@@ -1478,8 +1477,6 @@
 
         // Xử lý nút sắp xếp danh sách chi phí
         $('#sortExpensesBtn').click(function () {
-            if (!allowEdit) return; // Không cho phép sắp xếp nếu ở chế độ chỉ xem
-            
             // Đảo ngược thứ tự sắp xếp
             sortOrder = sortOrder === 'newest' ? 'oldest' : 'newest';
             
@@ -1604,8 +1601,12 @@
 
         // Xử lý tạo sự kiện mới
         $('#newEventBtn').click(function () {
-            if (!allowEdit) return; // Không cho phép tạo mới nếu ở chế độ chỉ xem
-            
+            if (!allowEdit) {
+                // Ở chế độ chỉ xem (share), chuyển về trang chính để tạo mới (chế độ chỉnh sửa)
+                localStorage.removeItem('currentEventCode');
+                window.location.href = '/';
+                return;
+            }
             if (confirm('Bạn có chắc chắn muốn tạo sự kiện mới? Dữ liệu hiện tại đã được lưu.')) {
                 createNewEvent();
                 localStorage.removeItem('currentEventCode');
