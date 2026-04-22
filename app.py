@@ -27,11 +27,18 @@ def init_db():
             members TEXT NOT NULL,
             expenses TEXT NOT NULL,
             bank_info TEXT,
+            couples TEXT NOT NULL DEFAULT '[]',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    
+
+    # Thêm cột couples cho DB cũ (SQLite không hỗ trợ ADD COLUMN IF NOT EXISTS)
+    try:
+        cursor.execute("ALTER TABLE events ADD COLUMN couples TEXT NOT NULL DEFAULT '[]'")
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -82,15 +89,16 @@ def create_event():
         cursor = conn.cursor()
         
         cursor.execute('''
-            INSERT INTO events (id, event_code, title, members, expenses, bank_info)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO events (id, event_code, title, members, expenses, bank_info, couples)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         ''', (
             event_id,
             event_code,
             data.get('title', 'Sự Kiện Mới'),
             json.dumps(data.get('members', [])),
             json.dumps(data.get('expenses', [])),
-            json.dumps(data.get('bankInfo', {}))
+            json.dumps(data.get('bankInfo', {})),
+            json.dumps(data.get('couples', []))
         ))
         
         conn.commit()
@@ -118,6 +126,7 @@ def get_event(event_code):
         conn.close()
         
         if event:
+            couples_raw = event['couples'] if 'couples' in event.keys() else '[]'
             return jsonify({
                 'success': True,
                 'event': {
@@ -127,6 +136,7 @@ def get_event(event_code):
                     'members': json.loads(event['members']),
                     'expenses': json.loads(event['expenses']),
                     'bankInfo': json.loads(event['bank_info']),
+                    'couples': json.loads(couples_raw) if couples_raw else [],
                     'created_at': event['created_at'],
                     'updated_at': event['updated_at']
                 }
@@ -147,14 +157,15 @@ def update_event(event_code):
         cursor = conn.cursor()
         
         cursor.execute('''
-            UPDATE events 
-            SET title = ?, members = ?, expenses = ?, bank_info = ?, updated_at = CURRENT_TIMESTAMP
+            UPDATE events
+            SET title = ?, members = ?, expenses = ?, bank_info = ?, couples = ?, updated_at = CURRENT_TIMESTAMP
             WHERE event_code = ?
         ''', (
             data.get('title', 'Sự Kiện Mới'),
             json.dumps(data.get('members', [])),
             json.dumps(data.get('expenses', [])),
             json.dumps(data.get('bankInfo', {})),
+            json.dumps(data.get('couples', [])),
             event_code
         ))
         

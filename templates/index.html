@@ -89,6 +89,41 @@
             margin-bottom: 5px;
         }
 
+        .couple-badge {
+            display: inline-flex;
+            align-items: center;
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 10px;
+            background: #fde7f3;
+            color: #c2185b;
+            margin-left: 6px;
+            white-space: nowrap;
+        }
+        .couple-badge .primary-dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: #c2185b;
+            margin-right: 4px;
+        }
+        .couple-row {
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 10px;
+            margin-bottom: 10px;
+            background: #fafafa;
+        }
+        .couple-row .couple-member-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px 14px;
+            margin-top: 6px;
+        }
+        .couple-row .couple-member-options label {
+            font-size: 0.9rem;
+            user-select: none;
+        }
+
         .header-icon {
             margin-right: 10px;
             color: #5c6bc0;
@@ -217,7 +252,12 @@
                 </div>
                 <div class="card-body">
                     <div class="mb-4">
-                        <h6 class="mb-3"><i class="fas fa-user-plus me-2"></i>Thành Viên</h6>
+                        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                            <h6 class="mb-0"><i class="fas fa-user-plus me-2"></i>Thành Viên</h6>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="manageCouplesBtn">
+                                <i class="fas fa-heart me-1"></i> Nhóm chung quỹ
+                            </button>
+                        </div>
                         <form id="memberForm" class="mb-3">
                             <div class="input-group">
                                 <input type="text" class="form-control" id="memberName" name="memberName"
@@ -496,6 +536,31 @@
     </div>
 </div>
 
+<!-- Modal Nhóm Chung Quỹ -->
+<div class="modal fade" id="couplesModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-heart me-2 text-danger"></i>Nhóm Chung Quỹ / Vợ Chồng</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small mb-3">
+                    Các thành viên trong cùng một nhóm sẽ gộp tiền với nhau. Chỉ <strong>người đại diện</strong> xuất hiện trong danh sách chuyển tiền.
+                </p>
+                <div id="couplesList"></div>
+                <button class="btn btn-outline-primary w-100 mt-2" id="addCoupleBtn">
+                    <i class="fas fa-plus me-1"></i> Thêm nhóm mới
+                </button>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                <button type="button" class="btn btn-primary" id="saveCouplesBtn">Lưu</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Modal Hiển Thị QR Code -->
 <div class="modal fade" id="qrCodeModal" tabindex="-1">
     <div class="modal-dialog">
@@ -536,8 +601,29 @@
         let members = [];
         let expenses = [];
         let bankInfo = {};
+        let couples = []; // [{id, label, members:[names], primary:name}]
+        let couplesDraft = []; // bản nháp khi đang mở modal, chỉ commit khi bấm Lưu
         let sortOrder = 'newest'; // 'newest' hoặc 'oldest'
         let allowEdit = true; // Mặc định cho phép sửa
+
+        // Trả về map: memberName -> couple object (chỉ các nhóm hợp lệ: >=2 thành viên thực sự tồn tại)
+        function getValidCouplesForMembers(currentMembers, coupleList) {
+            const result = { byMember: {}, list: [] };
+            (coupleList || []).forEach(c => {
+                if (!c || !Array.isArray(c.members)) return;
+                const validMembers = c.members.filter(m => currentMembers.includes(m));
+                if (validMembers.length < 2) return;
+                const primary = validMembers.includes(c.primary) ? c.primary : validMembers[0];
+                const entry = { id: c.id, label: c.label || '', members: validMembers, primary };
+                result.list.push(entry);
+                validMembers.forEach(m => { result.byMember[m] = entry; });
+            });
+            return result;
+        }
+
+        function formatCoupleLabel(couple) {
+            return couple.label && couple.label.trim() ? couple.label.trim() : couple.members.join(' & ');
+        }
 
         // Kiểm tra xem có event_code trong URL không
         const urlParams = new URLSearchParams(window.location.search);
@@ -591,6 +677,7 @@
                 $('#memberForm').hide();
                 $('#expenseForm').hide();
                 $('#calculateBtn').hide();
+                $('#manageCouplesBtn').hide();
                 $('#eventTitle').removeAttr('contenteditable');
                 $('#eventTitle').css('cursor', 'default');
                 
@@ -616,6 +703,7 @@
                 $('#memberForm').show();
                 $('#expenseForm').show();
                 $('#calculateBtn').show();
+                $('#manageCouplesBtn').show();
                 $('#eventTitle').attr('contenteditable', 'true');
                 $('#eventTitle').css('cursor', 'text');
                 
@@ -856,10 +944,11 @@
             members = [];
             expenses = [];
             bankInfo = {};
+            couples = [];
             renderMembers();
             renderExpenses();
             $('#resultContainer').hide();
-            
+
             // Cập nhật UI dựa trên chế độ chỉnh sửa
             updateUIForEditMode();
         }
@@ -877,7 +966,8 @@
                 title: $('#eventTitle').text(),
                 members: members,
                 expenses: expenses,
-                bankInfo: bankInfo
+                bankInfo: bankInfo,
+                couples: couples
             };
 
             if (currentEventCode) {
@@ -943,8 +1033,9 @@
                         }
                         updateEventCodeDisplay();
 
-                        // Cập nhật thành viên
+                        // Cập nhật thành viên & nhóm chung quỹ
                         members = eventData.members || [];
+                        couples = Array.isArray(eventData.couples) ? eventData.couples : [];
                         renderMembers();
 
                         // Cập nhật chi phí
@@ -984,10 +1075,22 @@
             $('#expensePayer').empty();
             $('#expensePayer').append('<option value="" selected disabled>Chọn người thanh toán...</option>');
 
+            const coupleMap = getValidCouplesForMembers(members, couples).byMember;
+
             members.forEach(function (member, index) {
+                const couple = coupleMap[member];
+                let badge = '';
+                if (couple) {
+                    const isPrimary = couple.primary === member;
+                    const tooltip = `Nhóm: ${formatCoupleLabel(couple)}${isPrimary ? ' (đại diện)' : ''}`;
+                    badge = `<span class="couple-badge" title="${tooltip}">
+                        ${isPrimary ? '<span class="primary-dot"></span>' : ''}
+                        <i class="fas fa-heart me-1" style="font-size:0.65rem;"></i>${formatCoupleLabel(couple)}
+                    </span>`;
+                }
                 $('#membersList').append(`
                 <div class="member-pill">
-                    ${member}
+                    ${member}${badge}
                     <span class="member-close" data-index="${index}" style="${!allowEdit ? 'display: none;' : ''}"><i class="fas fa-times"></i></span>
                 </div>
             `);
@@ -1217,6 +1320,19 @@
                 });
             });
 
+            // Gộp balance theo nhóm chung quỹ: dồn về người đại diện (primary)
+            const validCouples = getValidCouplesForMembers(members, couples);
+            const coupleByMember = validCouples.byMember;
+            const mergedBalances = { ...balances };
+            validCouples.list.forEach(c => {
+                let total = 0;
+                c.members.forEach(m => {
+                    total += mergedBalances[m] || 0;
+                    mergedBalances[m] = 0;
+                });
+                mergedBalances[c.primary] = total;
+            });
+
             // Hiển thị tổng quan
             $('#summaryTableBody').empty();
 
@@ -1245,14 +1361,29 @@
                     needToPay: needToPay
                 };
 
+                const couple = coupleByMember[member];
+                const isPrimary = couple && couple.primary === member;
+                const coupleTag = couple
+                    ? `<span class="couple-badge ms-1" title="Nhóm: ${formatCoupleLabel(couple)}">
+                         ${isPrimary ? '<span class="primary-dot"></span>' : ''}
+                         <i class="fas fa-heart me-1" style="font-size:0.65rem;"></i>${formatCoupleLabel(couple)}
+                       </span>`
+                    : '';
+
+                let balanceCell;
+                if (couple && !isPrimary) {
+                    balanceCell = `<td class="text-end text-muted small">→ gộp vào ${couple.primary}</td>`;
+                } else {
+                    const b = mergedBalances[member] || 0;
+                    balanceCell = `<td class="text-end ${b >= 0 ? 'text-success' : 'text-danger'}">${formatCurrency(b)}</td>`;
+                }
+
                 $('#summaryTableBody').append(`
         <tr>
-            <td>${member}</td>
+            <td>${member}${coupleTag}</td>
             <td class="text-end">${formatCurrency(paid)}</td>
             <td class="text-end">${formatCurrency(needToPay)}</td>
-            <td class="text-end ${balances[member] >= 0 ? 'text-success' : 'text-danger'}">
-                ${formatCurrency(balances[member])}
-            </td>
+            ${balanceCell}
         </tr>
         `);
             });
@@ -1261,11 +1392,11 @@
             const creditors = []; // Những người đã trả nhiều hơn
             const debtors = [];   // Những người trả ít hơn
 
-            for (let member in balances) {
-                if (balances[member] > 0.01) {  // Dùng 0.01 thay vì 0 để tránh lỗi làm tròn số thập phân
-                    creditors.push({name: member, amount: balances[member]});
-                } else if (balances[member] < -0.01) {
-                    debtors.push({name: member, amount: -balances[member]});
+            for (let member in mergedBalances) {
+                if (mergedBalances[member] > 0.01) {  // Dùng 0.01 thay vì 0 để tránh lỗi làm tròn số thập phân
+                    creditors.push({name: member, amount: mergedBalances[member]});
+                } else if (mergedBalances[member] < -0.01) {
+                    debtors.push({name: member, amount: -mergedBalances[member]});
                 }
             }
 
@@ -1409,6 +1540,14 @@
             }
 
             members.splice(index, 1);
+
+            // Dọn khỏi các nhóm chung quỹ
+            couples = (couples || []).map(c => {
+                const remaining = (c.members || []).filter(m => m !== memberToRemove);
+                const primary = remaining.includes(c.primary) ? c.primary : (remaining[0] || '');
+                return { ...c, members: remaining, primary };
+            }).filter(c => c.members.length >= 2);
+
             renderMembers();
 
             // Tự động lưu sau khi xóa thành viên
@@ -1516,10 +1655,161 @@
             renderExpenses();
         });
 
+        // ======= Nhóm chung quỹ =======
+        function generateCoupleId() {
+            return 'c-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        }
+
+        function renderCouplesModal() {
+            const $list = $('#couplesList');
+            $list.empty();
+
+            if (members.length < 2) {
+                $list.append('<div class="alert alert-warning mb-0">Cần ít nhất 2 thành viên trước khi tạo nhóm chung quỹ.</div>');
+                $('#addCoupleBtn').prop('disabled', true);
+                return;
+            }
+            $('#addCoupleBtn').prop('disabled', false);
+
+            if (couplesDraft.length === 0) {
+                $list.append('<p class="text-muted mb-2">Chưa có nhóm nào. Bấm "Thêm nhóm mới" để tạo.</p>');
+                return;
+            }
+
+            couplesDraft.forEach((couple, ci) => {
+                const selectedMembers = (couple.members || []).filter(m => members.includes(m));
+                const primary = selectedMembers.includes(couple.primary) ? couple.primary : (selectedMembers[0] || '');
+
+                const memberOptions = members.map(m => {
+                    const checked = selectedMembers.includes(m) ? 'checked' : '';
+                    return `<label class="me-2">
+                        <input type="checkbox" class="couple-member-cb" data-ci="${ci}" value="${m}" ${checked}> ${m}
+                    </label>`;
+                }).join('');
+
+                const primaryOptions = selectedMembers.length > 0
+                    ? selectedMembers.map(m => {
+                        const checked = m === primary ? 'checked' : '';
+                        return `<label class="me-2">
+                            <input type="radio" class="couple-primary-rb" name="primary-${ci}" data-ci="${ci}" value="${m}" ${checked}> ${m}
+                        </label>`;
+                    }).join('')
+                    : '<span class="text-muted small">Chọn thành viên trước</span>';
+
+                $list.append(`
+                    <div class="couple-row" data-ci="${ci}">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <strong><i class="fas fa-heart text-danger me-1"></i>Nhóm ${ci + 1}</strong>
+                            <button type="button" class="btn btn-sm btn-outline-danger remove-couple-btn" data-ci="${ci}">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small mb-1">Tên nhóm (tùy chọn)</label>
+                            <input type="text" class="form-control form-control-sm couple-label-input" data-ci="${ci}"
+                                   value="${(couple.label || '').replace(/"/g, '&quot;')}" placeholder="Ví dụ: Vợ chồng An & Bình">
+                        </div>
+                        <div class="mb-2">
+                            <div class="small text-muted mb-1">Thành viên trong nhóm:</div>
+                            <div class="couple-member-options">${memberOptions}</div>
+                        </div>
+                        <div>
+                            <div class="small text-muted mb-1">Người đại diện (người đứng tên chuyển/nhận tiền):</div>
+                            <div class="couple-member-options">${primaryOptions}</div>
+                        </div>
+                    </div>
+                `);
+            });
+        }
+
+        $('#manageCouplesBtn').click(function () {
+            if (!allowEdit) return;
+            if (members.length === 0) {
+                showToast('Vui lòng thêm thành viên trước!', 'warning');
+                return;
+            }
+            // Deep clone để chỉnh sửa không ảnh hưởng state gốc cho tới khi Save
+            couplesDraft = JSON.parse(JSON.stringify(couples || []));
+            renderCouplesModal();
+            $('#couplesModal').modal('show');
+        });
+
+        $('#addCoupleBtn').click(function () {
+            couplesDraft.push({ id: generateCoupleId(), label: '', members: [], primary: '' });
+            renderCouplesModal();
+        });
+
+        $(document).on('click', '.remove-couple-btn', function () {
+            const ci = $(this).data('ci');
+            couplesDraft.splice(ci, 1);
+            renderCouplesModal();
+        });
+
+        $(document).on('change', '.couple-member-cb', function () {
+            const ci = $(this).data('ci');
+            const name = $(this).val();
+            const couple = couplesDraft[ci];
+            if (!couple) return;
+            couple.members = couple.members || [];
+            if (this.checked) {
+                if (!couple.members.includes(name)) couple.members.push(name);
+            } else {
+                couple.members = couple.members.filter(m => m !== name);
+                if (couple.primary === name) couple.primary = couple.members[0] || '';
+            }
+            if (!couple.primary && couple.members.length > 0) couple.primary = couple.members[0];
+            renderCouplesModal();
+        });
+
+        $(document).on('change', '.couple-primary-rb', function () {
+            const ci = $(this).data('ci');
+            if (couplesDraft[ci]) {
+                couplesDraft[ci].primary = $(this).val();
+            }
+        });
+
+        $(document).on('input', '.couple-label-input', function () {
+            const ci = $(this).data('ci');
+            if (couplesDraft[ci]) {
+                couplesDraft[ci].label = $(this).val();
+            }
+        });
+
+        $('#saveCouplesBtn').click(function () {
+            // Validate và chuẩn hóa
+            const cleaned = [];
+            const seen = new Set();
+            for (const c of couplesDraft) {
+                const memberList = (c.members || []).filter(m => members.includes(m));
+                if (memberList.length < 2) continue; // bỏ nhóm chỉ có <2 người
+                // Một thành viên chỉ được thuộc 1 nhóm
+                const dup = memberList.find(m => seen.has(m));
+                if (dup) {
+                    showToast(`Thành viên "${dup}" đang ở trong nhiều nhóm. Vui lòng kiểm tra lại!`, 'warning');
+                    return;
+                }
+                memberList.forEach(m => seen.add(m));
+                const primary = memberList.includes(c.primary) ? c.primary : memberList[0];
+                cleaned.push({
+                    id: c.id || generateCoupleId(),
+                    label: (c.label || '').trim(),
+                    members: memberList,
+                    primary
+                });
+            }
+            couples = cleaned;
+            $('#couplesModal').modal('hide');
+            renderMembers();
+            saveEvent(false);
+            if (expenses.length > 0) calculateSplit(false);
+            showToast('Đã cập nhật nhóm chung quỹ!', 'success');
+        });
+        // ======= Hết phần nhóm chung quỹ =======
+
         // Vẫn giữ nút tính toán cho trường hợp người dùng muốn tính lại
         $('#calculateBtn').click(function () {
             if (!allowEdit) return; // Không cho phép tính toán nếu ở chế độ chỉ xem
-            
+
             calculateSplit(true); // Hiển thị thông báo lỗi nếu có
         });
 

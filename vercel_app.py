@@ -69,8 +69,8 @@ def create_event():
         cursor = conn.cursor()
         cursor.execute(
             '''
-            INSERT INTO events (id, event_code, title, members, expenses, bank_info)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO events (id, event_code, title, members, expenses, bank_info, couples)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             ''',
             (
                 event_id,
@@ -79,6 +79,7 @@ def create_event():
                 json.dumps(data.get('members', [])),
                 json.dumps(data.get('expenses', [])),
                 json.dumps(data.get('bankInfo', {})),
+                json.dumps(data.get('couples', [])),
             ),
         )
         conn.commit()
@@ -99,6 +100,7 @@ def get_event(event_code):
         conn.close()
 
         if event:
+            couples_raw = event.get('couples') if isinstance(event, dict) else None
             return jsonify({
                 'success': True,
                 'event': {
@@ -108,6 +110,7 @@ def get_event(event_code):
                     'members': json.loads(event['members']),
                     'expenses': json.loads(event['expenses']),
                     'bankInfo': json.loads(event['bank_info']) if event['bank_info'] else {},
+                    'couples': json.loads(couples_raw) if couples_raw else [],
                     'created_at': event['created_at'].isoformat() if event['created_at'] else None,
                     'updated_at': event['updated_at'].isoformat() if event['updated_at'] else None,
                 },
@@ -126,7 +129,7 @@ def update_event(event_code):
         cursor.execute(
             '''
             UPDATE events
-            SET title = %s, members = %s, expenses = %s, bank_info = %s, updated_at = CURRENT_TIMESTAMP
+            SET title = %s, members = %s, expenses = %s, bank_info = %s, couples = %s, updated_at = CURRENT_TIMESTAMP
             WHERE event_code = %s
             ''',
             (
@@ -134,6 +137,7 @@ def update_event(event_code):
                 json.dumps(data.get('members', [])),
                 json.dumps(data.get('expenses', [])),
                 json.dumps(data.get('bankInfo', {})),
+                json.dumps(data.get('couples', [])),
                 event_code,
             ),
         )
