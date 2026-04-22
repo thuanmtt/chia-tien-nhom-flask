@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_from_directory
 import psycopg2
 import psycopg2.extras
 import os
@@ -43,6 +43,19 @@ def generate_event_code():
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
+@app.route('/sw.js')
+def service_worker():
+    response = send_from_directory(app.static_folder, 'sw.js', mimetype='application/javascript')
+    response.headers['Service-Worker-Allowed'] = '/'
+    response.headers['Cache-Control'] = 'no-cache'
+    return response
+
+
+@app.route('/manifest.json')
+def manifest():
+    return send_from_directory(app.static_folder, 'manifest.json', mimetype='application/manifest+json')
 
 
 @app.route('/api/events', methods=['POST'])

@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for
+from flask import Flask, render_template, request, jsonify, redirect, url_for, send_from_directory
 import sqlite3
 import os
 import json
@@ -52,6 +52,19 @@ def get_db_connection():
 def index():
     """Trang chủ"""
     return render_template('index.html')
+
+@app.route('/sw.js')
+def service_worker():
+    """Phục vụ service worker với scope toàn site"""
+    response = send_from_directory(app.static_folder, 'sw.js', mimetype='application/javascript')
+    response.headers['Service-Worker-Allowed'] = '/'
+    response.headers['Cache-Control'] = 'no-cache'
+    return response
+
+@app.route('/manifest.json')
+def manifest():
+    """Phục vụ PWA manifest ở root"""
+    return send_from_directory(app.static_folder, 'manifest.json', mimetype='application/manifest+json')
 
 @app.route('/api/events', methods=['POST'])
 def create_event():
