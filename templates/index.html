@@ -533,6 +533,8 @@
         // Kiểm tra route share (chỉ xem)
         if (window.location.pathname.startsWith('/share/')) {
             allowEdit = false;
+            // Xóa state của sự kiện trước đó để tránh rò rỉ sang phiên khác
+            localStorage.removeItem('currentEventCode');
             // Lấy event_code từ path
             const pathParts = window.location.pathname.split('/');
             if (pathParts.length >= 3) {
@@ -546,10 +548,15 @@
             } else if (urlAllowEdit === 'false') {
                 allowEdit = false;
             }
-            
+
             currentEventCode = urlEventCode;
-            localStorage.setItem('currentEventCode', currentEventCode);
-            saveEventCodeToLocalStorage(currentEventCode); // Lưu event_code vào localStorage
+            if (allowEdit) {
+                localStorage.setItem('currentEventCode', currentEventCode);
+                saveEventCodeToLocalStorage(currentEventCode); // Lưu event_code vào localStorage
+            } else {
+                // Chế độ chỉ xem: không lưu để tránh leo thang quyền khi quay lại "/"
+                localStorage.removeItem('currentEventCode');
+            }
             loadEventFromServer(currentEventCode);
         } else if (currentEventCode) {
             saveEventCodeToLocalStorage(currentEventCode); // Lưu event_code vào localStorage
@@ -933,9 +940,12 @@
                         // Cập nhật thông tin ngân hàng
                         bankInfo = eventData.bankInfo || {};
 
-                        // Lưu event_code vào localStorage
-                        localStorage.setItem('currentEventCode', currentEventCode);
-                        saveEventCodeToLocalStorage(currentEventCode); // Lưu vào danh sách sự kiện đã lưu
+                        // Chỉ lưu event_code vào localStorage khi ở chế độ cho phép chỉnh sửa,
+                        // để tránh trường hợp mở link chỉ-xem rồi quay lại "/" vẫn vào được chế độ sửa
+                        if (allowEdit) {
+                            localStorage.setItem('currentEventCode', currentEventCode);
+                            saveEventCodeToLocalStorage(currentEventCode); // Lưu vào danh sách sự kiện đã lưu
+                        }
 
                         // Tự động tính toán khi tải sự kiện
                         calculateSplit(false);
