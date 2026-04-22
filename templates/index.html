@@ -1452,12 +1452,10 @@
 
             renderExpenses();
 
-            // Xóa trắng các trường input
+            // Xóa trắng các trường input (giữ lại Người thanh toán và Thanh toán cho ai để đỡ thao tác)
             $('#expenseTitle').val('');
             $('#expenseAmount').val('');
-            $('#expensePayer').val('');
-            $('#benefitType').val('all').trigger('change');
-            
+
             // Cập nhật preview sau khi reset
             updateAmountPreview();
 
