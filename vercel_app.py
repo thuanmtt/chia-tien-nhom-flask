@@ -7,6 +7,8 @@ import secrets
 import string
 from datetime import datetime
 import uuid
+from urllib.request import Request, urlopen
+from urllib.error import URLError, HTTPError
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -69,8 +71,8 @@ def create_event():
         cursor = conn.cursor()
         cursor.execute(
             '''
-            INSERT INTO events (id, event_code, title, members, expenses, bank_info, couples)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO events (id, event_code, title, members, expenses, bank_info, couples, rates)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ''',
             (
                 event_id,
@@ -80,6 +82,7 @@ def create_event():
                 json.dumps(data.get('expenses', [])),
                 json.dumps(data.get('bankInfo', {})),
                 json.dumps(data.get('couples', [])),
+                json.dumps(data.get('rates', {})),
             ),
         )
         conn.commit()
@@ -101,6 +104,7 @@ def get_event(event_code):
 
         if event:
             couples_raw = event.get('couples') if isinstance(event, dict) else None
+            rates_raw = event.get('rates') if isinstance(event, dict) else None
             return jsonify({
                 'success': True,
                 'event': {
@@ -111,6 +115,7 @@ def get_event(event_code):
                     'expenses': json.loads(event['expenses']),
                     'bankInfo': json.loads(event['bank_info']) if event['bank_info'] else {},
                     'couples': json.loads(couples_raw) if couples_raw else [],
+                    'rates': json.loads(rates_raw) if rates_raw else {},
                     'created_at': event['created_at'].isoformat() if event['created_at'] else None,
                     'updated_at': event['updated_at'].isoformat() if event['updated_at'] else None,
                 },
@@ -129,7 +134,7 @@ def update_event(event_code):
         cursor.execute(
             '''
             UPDATE events
-            SET title = %s, members = %s, expenses = %s, bank_info = %s, couples = %s, updated_at = CURRENT_TIMESTAMP
+            SET title = %s, members = %s, expenses = %s, bank_info = %s, couples = %s, rates = %s, updated_at = CURRENT_TIMESTAMP
             WHERE event_code = %s
             ''',
             (
@@ -138,6 +143,7 @@ def update_event(event_code):
                 json.dumps(data.get('expenses', [])),
                 json.dumps(data.get('bankInfo', {})),
                 json.dumps(data.get('couples', [])),
+                json.dumps(data.get('rates', {})),
                 event_code,
             ),
         )
@@ -147,6 +153,42 @@ def update_event(event_code):
         conn.commit()
         conn.close()
         return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _fetch_vietcombank_rates(date_str):
+    url = f'https://vietcombank.com.vn/api/exchangerates?date={date_str}'
+    req = Request(url, headers={
+        'accept': '*/*',
+        'referer': 'https://vietcombank.com.vn/vi-VN/KHCN/Cong-cu-Tien-ich/Ty-gia',
+        'user-agent': 'Mozilla/5.0',
+    })
+    with urlopen(req, timeout=10) as resp:
+        raw = resp.read().decode('utf-8')
+    payload = json.loads(raw)
+    rates = {}
+    for item in payload.get('Data', []) or []:
+        code = item.get('currencyCode')
+        if not code:
+            continue
+        rates[code] = {
+            'currencyName': item.get('currencyName', ''),
+            'cash': float(item.get('cash') or 0) or None,
+            'transfer': float(item.get('transfer') or 0) or None,
+            'sell': float(item.get('sell') or 0) or None,
+        }
+    return {'date': payload.get('Date'), 'updatedDate': payload.get('UpdatedDate'), 'rates': rates}
+
+
+@app.route('/api/exchange-rates')
+def get_exchange_rates():
+    date_str = request.args.get('date') or datetime.now().strftime('%Y-%m-%d')
+    try:
+        data = _fetch_vietcombank_rates(date_str)
+        return jsonify({'success': True, **data})
+    except (HTTPError, URLError) as e:
+        return jsonify({'success': False, 'error': f'Không kết nối được Vietcombank: {e}'}), 502
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 

@@ -238,6 +238,9 @@
                             <small id="eventCodeDisplay" class="text-muted"></small>
                         </h5>
                         <div class="group-actions mt-2 mt-md-0">
+                            <button class="btn btn-sm btn-outline-warning mb-1 mb-md-0 me-1" id="configRatesBtn">
+                                <i class="fas fa-coins me-1"></i> Tỷ giá
+                            </button>
                             <button class="btn btn-sm btn-outline-info mb-1 mb-md-0" id="configBankInfoBtn">
                                 <i class="fas fa-university me-1"></i> Cấu hình ngân hàng
                             </button>
@@ -284,10 +287,19 @@
                                            placeholder="Ví dụ: Tiền ăn, tiền xe...">
                                 </div>
                                 <div class="col-md-6">
-                                    <label for="expenseAmount" class="form-label">Số tiền (VND)</label>
+                                    <div class="d-flex justify-content-between align-items-end">
+                                        <label for="expenseAmount" class="form-label mb-0">Số tiền</label>
+                                        <button type="button" class="btn btn-sm btn-link p-0" id="openRatesFromFormBtn"
+                                                style="font-size:0.8rem;text-decoration:none;">
+                                            <i class="fas fa-coins me-1"></i>Cấu hình tỷ giá
+                                        </button>
+                                    </div>
                                     <div class="input-group">
                                         <input type="number" class="form-control" id="expenseAmount" name="expenseAmount"
                                                placeholder="Nhập số tiền...">
+                                        <select class="form-select" id="expenseCurrency" style="max-width:110px;">
+                                            <option value="VND" selected>VND</option>
+                                        </select>
                                         <div class="input-group-text">
                                             <div class="form-check mb-0">
                                                 <input class="form-check-input" type="checkbox" id="addZerosCheckbox" checked>
@@ -536,6 +548,68 @@
     </div>
 </div>
 
+<!-- Modal Cấu Hình Tỷ Giá -->
+<div class="modal fade" id="ratesModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-coins me-2 text-warning"></i>Cấu hình Tỷ Giá</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small mb-3">
+                    Tỷ giá = 1 đơn vị ngoại tệ tương đương bao nhiêu VND. Mặc định lấy tỷ giá <strong>chuyển khoản</strong> của Vietcombank.
+                </p>
+                <div class="row g-2 mb-3">
+                    <div class="col-sm-5">
+                        <label class="form-label small mb-1">Ngày tỷ giá (Vietcombank)</label>
+                        <input type="date" class="form-control form-control-sm" id="ratesDate">
+                    </div>
+                    <div class="col-sm-4">
+                        <label class="form-label small mb-1">Loại tỷ giá</label>
+                        <select class="form-select form-select-sm" id="ratesType">
+                            <option value="transfer" selected>Chuyển khoản</option>
+                            <option value="cash">Tiền mặt (mua vào)</option>
+                            <option value="sell">Bán ra</option>
+                        </select>
+                    </div>
+                    <div class="col-sm-3 d-flex align-items-end">
+                        <button type="button" class="btn btn-sm btn-primary w-100" id="fetchRatesBtn">
+                            <i class="fas fa-sync-alt me-1"></i>Lấy từ VCB
+                        </button>
+                    </div>
+                </div>
+                <div id="ratesStatus" class="small text-muted mb-2"></div>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Tiền tệ</th>
+                                <th>Tên</th>
+                                <th class="text-end">Tỷ giá (VND)</th>
+                                <th>Nguồn</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="ratesTableBody"></tbody>
+                    </table>
+                </div>
+                <div class="d-flex gap-2 flex-wrap">
+                    <div class="input-group input-group-sm" style="max-width: 320px;">
+                        <span class="input-group-text">Thêm mã</span>
+                        <input type="text" class="form-control text-uppercase" id="addCurrencyCode" maxlength="6" placeholder="VD: KRW">
+                        <button class="btn btn-outline-primary" type="button" id="addCurrencyBtn">Thêm</button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                <button type="button" class="btn btn-primary" id="saveRatesBtn">Lưu</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Modal Nhóm Chung Quỹ -->
 <div class="modal fade" id="couplesModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
@@ -603,8 +677,77 @@
         let bankInfo = {};
         let couples = []; // [{id, label, members:[names], primary:name}]
         let couplesDraft = []; // bản nháp khi đang mở modal, chỉ commit khi bấm Lưu
+        let rates = {}; // { [currencyCode]: { rate: Number, source: 'vietcombank'|'custom', rateDate: 'YYYY-MM-DD', rateType: 'transfer'|... } } — 1 đơn vị = rate VND
+        let ratesDraft = {}; // bản nháp khi mở modal
         let sortOrder = 'newest'; // 'newest' hoặc 'oldest'
         let allowEdit = true; // Mặc định cho phép sửa
+
+        // Danh sách tiền tệ thông dụng cho dropdown
+        const COMMON_CURRENCIES = [
+            { code: 'VND', name: 'Việt Nam Đồng' },
+            { code: 'USD', name: 'US Dollar' },
+            { code: 'JPY', name: 'Japanese Yen' },
+            { code: 'EUR', name: 'Euro' },
+            { code: 'KRW', name: 'Korean Won' },
+            { code: 'THB', name: 'Thai Baht' },
+            { code: 'SGD', name: 'Singapore Dollar' },
+            { code: 'CNY', name: 'Chinese Yuan' },
+            { code: 'AUD', name: 'Australian Dollar' },
+            { code: 'GBP', name: 'UK Pound' },
+            { code: 'HKD', name: 'Hong Kong Dollar' },
+            { code: 'TWD', name: 'Taiwan Dollar' },
+            { code: 'MYR', name: 'Malaysian Ringgit' },
+            { code: 'CHF', name: 'Swiss Franc' },
+            { code: 'CAD', name: 'Canadian Dollar' },
+        ];
+        const CURRENCY_NAME = {};
+        COMMON_CURRENCIES.forEach(c => { CURRENCY_NAME[c.code] = c.name; });
+
+        function getCurrencyOfExpense(expense) {
+            return (expense && expense.currency) ? expense.currency : 'VND';
+        }
+
+        function getRateToVND(currencyCode) {
+            if (!currencyCode || currencyCode === 'VND') return 1;
+            const entry = rates[currencyCode];
+            if (entry && typeof entry.rate === 'number' && entry.rate > 0) return entry.rate;
+            return null; // chưa có tỷ giá
+        }
+
+        function amountInVND(expense) {
+            const cur = getCurrencyOfExpense(expense);
+            const amt = parseFloat(expense.amount) || 0;
+            if (cur === 'VND') return amt;
+            const rate = getRateToVND(cur);
+            if (rate === null) return null; // thiếu tỷ giá
+            return amt * rate;
+        }
+
+        function collectCurrenciesFromExpenses() {
+            const set = new Set();
+            expenses.forEach(e => {
+                const c = getCurrencyOfExpense(e);
+                if (c && c !== 'VND') set.add(c);
+            });
+            return Array.from(set);
+        }
+
+        function renderCurrencyDropdown() {
+            const $sel = $('#expenseCurrency');
+            const current = $sel.val() || 'VND';
+            $sel.empty();
+            // Gộp: common + bất kỳ mã tiền tệ nào đang dùng trong expenses/rates
+            const extras = new Set([...Object.keys(rates), ...collectCurrenciesFromExpenses()]);
+            const seen = new Set();
+            const codes = [];
+            COMMON_CURRENCIES.forEach(c => { if (!seen.has(c.code)) { seen.add(c.code); codes.push(c.code); } });
+            Array.from(extras).sort().forEach(code => { if (!seen.has(code)) { seen.add(code); codes.push(code); } });
+            codes.forEach(code => {
+                const name = CURRENCY_NAME[code] || (rates[code] && rates[code].currencyName) || '';
+                $sel.append(`<option value="${code}">${code}${name ? ' - ' + name : ''}</option>`);
+            });
+            $sel.val(codes.includes(current) ? current : 'VND');
+        }
 
         // Trả về map: memberName -> couple object (chỉ các nhóm hợp lệ: >=2 thành viên thực sự tồn tại)
         function getValidCouplesForMembers(currentMembers, coupleList) {
@@ -672,6 +815,7 @@
                 // Ẩn các nút và form chỉnh sửa
                 $('#savedEventsBtn').hide();
                 $('#configBankInfoBtn').hide();
+                $('#configRatesBtn').hide();
                 $('#saveEventBtn').hide();
                 $('#shareEventBtn').hide();
                 $('#memberForm').hide();
@@ -704,6 +848,7 @@
                 $('#expenseForm').show();
                 $('#calculateBtn').show();
                 $('#manageCouplesBtn').show();
+                $('#configRatesBtn').show();
                 $('#eventTitle').attr('contenteditable', 'true');
                 $('#eventTitle').css('cursor', 'text');
                 
@@ -897,7 +1042,14 @@
 
         // Format số tiền thành định dạng VND
         function formatCurrency(amount) {
-            return new Intl.NumberFormat('vi-VN').format(amount) + ' VND';
+            return new Intl.NumberFormat('vi-VN').format(Math.round(amount)) + ' VND';
+        }
+
+        // Format số tiền theo currency (không chuyển đổi)
+        function formatAmountWithCurrency(amount, currencyCode) {
+            const n = Number(amount) || 0;
+            const formatted = new Intl.NumberFormat('vi-VN').format(Math.round(n));
+            return `${formatted} ${currencyCode || 'VND'}`;
         }
 
         // Hàm cập nhật preview số tiền sẽ lưu
@@ -905,19 +1057,27 @@
             const amountInput = $('#expenseAmount');
             const checkbox = $('#addZerosCheckbox');
             const previewSpan = $('#amountPreview span');
-            
+            const currency = $('#expenseCurrency').val() || 'VND';
+
             let amount = amountInput.val().trim();
-            
+
             if (amount && !isNaN(amount)) {
-                // Nếu checkbox được tick, thêm 3 số 0
                 if (checkbox.is(':checked')) {
                     amount = amount + '000';
                 }
-                
-                const formattedAmount = formatCurrency(parseFloat(amount));
-                previewSpan.text(formattedAmount);
+                const raw = parseFloat(amount);
+                let text = formatAmountWithCurrency(raw, currency);
+                if (currency !== 'VND') {
+                    const rate = getRateToVND(currency);
+                    if (rate !== null) {
+                        text += ` (≈ ${formatCurrency(raw * rate)})`;
+                    } else {
+                        text += ` <span class="text-danger">(chưa có tỷ giá — bấm "Cấu hình tỷ giá")</span>`;
+                    }
+                }
+                previewSpan.html(text);
             } else {
-                previewSpan.text('0 VND');
+                previewSpan.text(currency === 'VND' ? '0 VND' : `0 ${currency}`);
             }
         }
 
@@ -931,7 +1091,12 @@
         // Xử lý khi thay đổi checkbox - cập nhật preview
         $('#addZerosCheckbox').change(function() {
             if (!allowEdit) return; // Không cho phép thay đổi nếu ở chế độ chỉ xem
-            
+
+            updateAmountPreview();
+        });
+
+        // Đổi tiền tệ → cập nhật preview
+        $('#expenseCurrency').on('change', function () {
             updateAmountPreview();
         });
 
@@ -945,6 +1110,8 @@
             expenses = [];
             bankInfo = {};
             couples = [];
+            rates = {};
+            renderCurrencyDropdown();
             renderMembers();
             renderExpenses();
             $('#resultContainer').hide();
@@ -967,7 +1134,8 @@
                 members: members,
                 expenses: expenses,
                 bankInfo: bankInfo,
-                couples: couples
+                couples: couples,
+                rates: rates
             };
 
             if (currentEventCode) {
@@ -1037,6 +1205,10 @@
                         members = eventData.members || [];
                         couples = Array.isArray(eventData.couples) ? eventData.couples : [];
                         renderMembers();
+
+                        // Cập nhật tỷ giá
+                        rates = (eventData.rates && typeof eventData.rates === 'object') ? eventData.rates : {};
+                        renderCurrencyDropdown();
 
                         // Cập nhật chi phí
                         expenses = eventData.expenses || [];
@@ -1144,13 +1316,25 @@
                     }
                 }
 
+                const expCurrency = getCurrencyOfExpense(expense);
+                let amountDisplay;
+                if (expCurrency === 'VND') {
+                    amountDisplay = formatCurrency(expense.amount);
+                } else {
+                    const vnd = amountInVND(expense);
+                    const base = formatAmountWithCurrency(expense.amount, expCurrency);
+                    amountDisplay = vnd !== null
+                        ? `${base} <span class="text-muted small">(≈ ${formatCurrency(vnd)})</span>`
+                        : `${base} <span class="text-danger small">(chưa có tỷ giá)</span>`;
+                }
+
                 $('#expensesList').append(`
         <div class="expense-item p-2">
             <div class="d-flex justify-content-between align-items-center">
                 <div>
                     <h6 class="mb-1">${expense.title}</h6>
                     <p class="mb-0 text-muted">
-                        <small>${expense.payer} đã thanh toán ${formatCurrency(expense.amount)} ${benefitInfo}</small>
+                        <small>${expense.payer} đã thanh toán ${amountDisplay} ${benefitInfo}</small>
                     </p>
                 </div>
                 <div style="${!allowEdit ? 'display: none;' : ''}">
@@ -1298,22 +1482,36 @@
                 return;
             }
 
-            // Khởi tạo số dư cho mỗi thành viên
+            // Kiểm tra tỷ giá: mọi expense ngoại tệ phải có tỷ giá
+            const missingRates = [];
+            expenses.forEach(exp => {
+                const c = getCurrencyOfExpense(exp);
+                if (c !== 'VND' && getRateToVND(c) === null && !missingRates.includes(c)) {
+                    missingRates.push(c);
+                }
+            });
+            if (missingRates.length > 0) {
+                if (showErrors) showToast(`Thiếu tỷ giá cho: ${missingRates.join(', ')}. Vui lòng bấm "Tỷ giá" để thiết lập.`, 'warning');
+                $('#resultContainer').hide();
+                return;
+            }
+
+            // Khởi tạo số dư cho mỗi thành viên (đơn vị: VND)
             const balances = {};
             members.forEach(member => {
                 balances[member] = 0;
             });
 
-            // Cộng tiền đã chi cho người thanh toán
+            // Cộng tiền đã chi cho người thanh toán (đã quy đổi về VND)
             expenses.forEach(expense => {
-                balances[expense.payer] += parseFloat(expense.amount);
+                balances[expense.payer] += amountInVND(expense) || 0;
             });
 
-            // Tính tiền mỗi người phải trả dựa trên số người hưởng lợi
+            // Tính tiền mỗi người phải trả dựa trên số người hưởng lợi (VND)
             expenses.forEach(expense => {
-                const amount = parseFloat(expense.amount);
+                const amountVnd = amountInVND(expense) || 0;
                 const beneficiaries = expense.beneficiaries || members;
-                const amountPerPerson = amount / beneficiaries.length;
+                const amountPerPerson = amountVnd / beneficiaries.length;
 
                 beneficiaries.forEach(member => {
                     balances[member] -= amountPerPerson;
@@ -1336,22 +1534,22 @@
             // Hiển thị tổng quan
             $('#summaryTableBody').empty();
 
-            // Tính tổng chi tiêu và phần chi tiêu của từng người
-            const totalExpense = expenses.reduce((sum, expense) => sum + parseFloat(expense.amount), 0);
+            // Tính tổng chi tiêu và phần chi tiêu của từng người (quy đổi VND)
+            const totalExpense = expenses.reduce((sum, expense) => sum + (amountInVND(expense) || 0), 0);
 
             // Tạo đối tượng chứa thông tin chi tiêu của từng người
             const memberExpenseInfo = {};
             members.forEach(member => {
-                // Số tiền đã trả
+                // Số tiền đã trả (VND)
                 const paid = expenses
                     .filter(expense => expense.payer === member)
-                    .reduce((sum, expense) => sum + parseFloat(expense.amount), 0);
+                    .reduce((sum, expense) => sum + (amountInVND(expense) || 0), 0);
 
-                // Số tiền cần trả (dựa trên các chi phí mà thành viên này được hưởng lợi)
+                // Số tiền cần trả (dựa trên các chi phí mà thành viên này được hưởng lợi, VND)
                 const needToPay = expenses.reduce((sum, expense) => {
                     const beneficiaries = expense.beneficiaries || members;
                     if (beneficiaries.includes(member)) {
-                        return sum + (parseFloat(expense.amount) / beneficiaries.length);
+                        return sum + ((amountInVND(expense) || 0) / beneficiaries.length);
                     }
                     return sum;
                 }, 0);
@@ -1605,9 +1803,16 @@
                 }
             }
 
+            const currency = $('#expenseCurrency').val() || 'VND';
+            if (currency !== 'VND' && getRateToVND(currency) === null) {
+                showToast(`Chưa có tỷ giá cho ${currency}. Vui lòng bấm "Cấu hình tỷ giá" để thêm!`, 'warning');
+                return;
+            }
+
             expenses.push({
                 title: title,
                 amount: parseFloat(amount),
+                currency: currency,
                 payer: payer,
                 benefitType: benefitType,
                 beneficiaries: beneficiaries
@@ -1805,6 +2010,204 @@
             showToast('Đã cập nhật nhóm chung quỹ!', 'success');
         });
         // ======= Hết phần nhóm chung quỹ =======
+
+        // ======= Cấu hình tỷ giá =======
+        function todayYYYYMMDD() {
+            const d = new Date();
+            const pad = n => n.toString().padStart(2, '0');
+            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        }
+
+        function renderRatesTable() {
+            const $tb = $('#ratesTableBody');
+            $tb.empty();
+            const codes = Object.keys(ratesDraft).sort();
+            // Luôn gợi ý thêm các currency đang dùng trong expenses mà chưa có trong ratesDraft
+            collectCurrenciesFromExpenses().forEach(c => {
+                if (!ratesDraft[c]) {
+                    ratesDraft[c] = { rate: null, source: 'missing', rateDate: null, rateType: null };
+                    if (!codes.includes(c)) codes.push(c);
+                }
+            });
+            codes.sort();
+            if (codes.length === 0) {
+                $tb.append('<tr><td colspan="5" class="text-center text-muted">Chưa có ngoại tệ nào. Thêm ở ô bên dưới hoặc bấm "Lấy từ VCB".</td></tr>');
+                return;
+            }
+            codes.forEach(code => {
+                const entry = ratesDraft[code] || {};
+                const rateVal = (typeof entry.rate === 'number' && entry.rate > 0) ? entry.rate : '';
+                const name = CURRENCY_NAME[code] || entry.currencyName || '';
+                let sourceBadge;
+                if (entry.source === 'vietcombank') {
+                    const dateStr = entry.rateDate ? ` (${entry.rateDate})` : '';
+                    sourceBadge = `<span class="badge bg-primary">VCB${dateStr}</span>`;
+                } else if (entry.source === 'custom') {
+                    sourceBadge = '<span class="badge bg-secondary">Tùy chỉnh</span>';
+                } else {
+                    sourceBadge = '<span class="badge bg-warning text-dark">Chưa có</span>';
+                }
+                $tb.append(`
+                    <tr data-code="${code}">
+                        <td><strong>${code}</strong></td>
+                        <td class="small text-muted">${name}</td>
+                        <td class="text-end">
+                            <input type="number" step="0.0001" min="0" class="form-control form-control-sm text-end rates-rate-input"
+                                   value="${rateVal}" data-code="${code}" style="max-width:180px;display:inline-block;">
+                        </td>
+                        <td>${sourceBadge}</td>
+                        <td class="text-end">
+                            <button class="btn btn-sm btn-outline-danger rates-remove-btn" data-code="${code}" title="Xóa">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `);
+            });
+        }
+
+        function openRatesModal() {
+            if (!allowEdit) return;
+            ratesDraft = JSON.parse(JSON.stringify(rates || {}));
+            $('#ratesDate').val(todayYYYYMMDD());
+            $('#ratesStatus').text('');
+            renderRatesTable();
+            $('#ratesModal').modal('show');
+        }
+
+        $('#configRatesBtn').click(openRatesModal);
+        $('#openRatesFromFormBtn').click(openRatesModal);
+
+        $('#fetchRatesBtn').click(function () {
+            const date = $('#ratesDate').val() || todayYYYYMMDD();
+            const rateType = $('#ratesType').val() || 'transfer';
+            const $btn = $(this);
+            $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Đang lấy...');
+            $('#ratesStatus').text('');
+            $.ajax({
+                url: '/api/exchange-rates?date=' + encodeURIComponent(date),
+                method: 'GET',
+                success: function (resp) {
+                    if (!resp.success) {
+                        $('#ratesStatus').html(`<span class="text-danger">${resp.error || 'Lỗi không xác định'}</span>`);
+                        return;
+                    }
+                    const vcb = resp.rates || {};
+                    const codesToUpdate = new Set([
+                        ...Object.keys(ratesDraft),
+                        ...collectCurrenciesFromExpenses(),
+                    ]);
+                    // Nếu chưa có gì, lấy các currency thông dụng được Vietcombank trả về
+                    if (codesToUpdate.size === 0) {
+                        Object.keys(vcb).forEach(c => codesToUpdate.add(c));
+                    }
+                    let updated = 0, missing = [];
+                    codesToUpdate.forEach(code => {
+                        if (code === 'VND') return;
+                        const src = vcb[code];
+                        if (!src) { missing.push(code); return; }
+                        const rate = src[rateType];
+                        if (!rate || rate <= 0) { missing.push(code); return; }
+                        ratesDraft[code] = {
+                            rate: rate,
+                            source: 'vietcombank',
+                            rateDate: (resp.date || date || '').slice(0, 10),
+                            rateType: rateType,
+                            currencyName: src.currencyName || CURRENCY_NAME[code] || '',
+                        };
+                        updated++;
+                    });
+                    let msg = `Đã cập nhật ${updated} tỷ giá từ Vietcombank (${rateType}, ngày ${(resp.date || date || '').slice(0, 10)}).`;
+                    if (missing.length > 0) msg += ` Không có tỷ giá cho: ${missing.join(', ')}.`;
+                    $('#ratesStatus').html(`<span class="text-success">${msg}</span>`);
+                    renderRatesTable();
+                },
+                error: function (xhr) {
+                    let err = 'Không kết nối được máy chủ.';
+                    try { err = JSON.parse(xhr.responseText).error || err; } catch (_) {}
+                    $('#ratesStatus').html(`<span class="text-danger">${err}</span>`);
+                },
+                complete: function () {
+                    $btn.prop('disabled', false).html('<i class="fas fa-sync-alt me-1"></i>Lấy từ VCB');
+                }
+            });
+        });
+
+        $(document).on('input', '.rates-rate-input', function () {
+            const code = $(this).data('code');
+            const v = parseFloat($(this).val());
+            if (!ratesDraft[code]) ratesDraft[code] = {};
+            if (!isNaN(v) && v > 0) {
+                const previous = ratesDraft[code];
+                ratesDraft[code] = {
+                    ...previous,
+                    rate: v,
+                    // Nếu người dùng gõ khác với rate vừa lấy từ VCB, đánh dấu là custom
+                    source: (previous && previous.source === 'vietcombank' && previous.rate === v) ? 'vietcombank' : 'custom',
+                };
+            } else {
+                ratesDraft[code].rate = null;
+                ratesDraft[code].source = 'missing';
+            }
+            // Re-render badge only (tránh mất focus input) — cập nhật badge của row hiện tại
+            const $row = $(this).closest('tr');
+            const entry = ratesDraft[code];
+            let badge;
+            if (entry.source === 'vietcombank') {
+                const dateStr = entry.rateDate ? ` (${entry.rateDate})` : '';
+                badge = `<span class="badge bg-primary">VCB${dateStr}</span>`;
+            } else if (entry.source === 'custom') {
+                badge = '<span class="badge bg-secondary">Tùy chỉnh</span>';
+            } else {
+                badge = '<span class="badge bg-warning text-dark">Chưa có</span>';
+            }
+            $row.find('td').eq(3).html(badge);
+        });
+
+        $(document).on('click', '.rates-remove-btn', function () {
+            const code = $(this).data('code');
+            delete ratesDraft[code];
+            renderRatesTable();
+        });
+
+        $('#addCurrencyBtn').click(function () {
+            const code = ($('#addCurrencyCode').val() || '').trim().toUpperCase();
+            if (!code || code === 'VND') {
+                showToast('Vui lòng nhập mã tiền tệ (không phải VND).', 'warning');
+                return;
+            }
+            if (!ratesDraft[code]) {
+                ratesDraft[code] = { rate: null, source: 'missing' };
+            }
+            $('#addCurrencyCode').val('');
+            renderRatesTable();
+        });
+
+        $('#saveRatesBtn').click(function () {
+            // Chỉ giữ các entry có rate hợp lệ
+            const cleaned = {};
+            Object.keys(ratesDraft).forEach(code => {
+                const entry = ratesDraft[code];
+                if (entry && typeof entry.rate === 'number' && entry.rate > 0) {
+                    cleaned[code] = {
+                        rate: entry.rate,
+                        source: entry.source === 'vietcombank' ? 'vietcombank' : 'custom',
+                        rateDate: entry.rateDate || null,
+                        rateType: entry.rateType || null,
+                        currencyName: entry.currencyName || CURRENCY_NAME[code] || '',
+                    };
+                }
+            });
+            rates = cleaned;
+            $('#ratesModal').modal('hide');
+            renderCurrencyDropdown();
+            updateAmountPreview();
+            renderExpenses();
+            saveEvent(false);
+            if (expenses.length > 0) calculateSplit(false);
+            showToast('Đã lưu tỷ giá!', 'success');
+        });
+        // ======= Hết phần cấu hình tỷ giá =======
 
         // Vẫn giữ nút tính toán cho trường hợp người dùng muốn tính lại
         $('#calculateBtn').click(function () {
@@ -2046,10 +2449,15 @@
             $('#expenseAmount').val(expense.amount);
             $('#expensePayer').val(expense.payer);
             $('#benefitType').val(expense.benefitType || 'all').trigger('change');
+            const curEdit = getCurrencyOfExpense(expense);
+            if ($('#expenseCurrency option[value="' + curEdit + '"]').length === 0) {
+                $('#expenseCurrency').append(`<option value="${curEdit}">${curEdit}</option>`);
+            }
+            $('#expenseCurrency').val(curEdit);
 
-            // Xử lý checkbox thêm 3 số 0 khi edit
+            // Xử lý checkbox thêm 3 số 0 khi edit (chỉ áp dụng ý nghĩa cho VND)
             const amount = expense.amount.toString();
-            if (amount.endsWith('000')) {
+            if (curEdit === 'VND' && amount.endsWith('000')) {
                 $('#addZerosCheckbox').prop('checked', true);
                 $('#expenseAmount').val(amount);
             } else {

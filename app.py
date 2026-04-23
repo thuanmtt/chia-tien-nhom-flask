@@ -6,6 +6,8 @@ import secrets
 import string
 from datetime import datetime
 import uuid
+from urllib.request import Request, urlopen
+from urllib.error import URLError, HTTPError
 
 app = Flask(__name__)
 
@@ -28,16 +30,21 @@ def init_db():
             expenses TEXT NOT NULL,
             bank_info TEXT,
             couples TEXT NOT NULL DEFAULT '[]',
+            rates TEXT NOT NULL DEFAULT '{}',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
 
-    # Thêm cột couples cho DB cũ (SQLite không hỗ trợ ADD COLUMN IF NOT EXISTS)
-    try:
-        cursor.execute("ALTER TABLE events ADD COLUMN couples TEXT NOT NULL DEFAULT '[]'")
-    except sqlite3.OperationalError:
-        pass
+    # Thêm các cột mới cho DB cũ (SQLite không hỗ trợ ADD COLUMN IF NOT EXISTS)
+    for ddl in (
+        "ALTER TABLE events ADD COLUMN couples TEXT NOT NULL DEFAULT '[]'",
+        "ALTER TABLE events ADD COLUMN rates TEXT NOT NULL DEFAULT '{}'",
+    ):
+        try:
+            cursor.execute(ddl)
+        except sqlite3.OperationalError:
+            pass
 
     conn.commit()
     conn.close()
@@ -89,8 +96,8 @@ def create_event():
         cursor = conn.cursor()
         
         cursor.execute('''
-            INSERT INTO events (id, event_code, title, members, expenses, bank_info, couples)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO events (id, event_code, title, members, expenses, bank_info, couples, rates)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             event_id,
             event_code,
@@ -98,7 +105,8 @@ def create_event():
             json.dumps(data.get('members', [])),
             json.dumps(data.get('expenses', [])),
             json.dumps(data.get('bankInfo', {})),
-            json.dumps(data.get('couples', []))
+            json.dumps(data.get('couples', [])),
+            json.dumps(data.get('rates', {}))
         ))
         
         conn.commit()
@@ -126,7 +134,9 @@ def get_event(event_code):
         conn.close()
         
         if event:
-            couples_raw = event['couples'] if 'couples' in event.keys() else '[]'
+            keys = event.keys()
+            couples_raw = event['couples'] if 'couples' in keys else '[]'
+            rates_raw = event['rates'] if 'rates' in keys else '{}'
             return jsonify({
                 'success': True,
                 'event': {
@@ -137,6 +147,7 @@ def get_event(event_code):
                     'expenses': json.loads(event['expenses']),
                     'bankInfo': json.loads(event['bank_info']),
                     'couples': json.loads(couples_raw) if couples_raw else [],
+                    'rates': json.loads(rates_raw) if rates_raw else {},
                     'created_at': event['created_at'],
                     'updated_at': event['updated_at']
                 }
@@ -158,7 +169,7 @@ def update_event(event_code):
         
         cursor.execute('''
             UPDATE events
-            SET title = ?, members = ?, expenses = ?, bank_info = ?, couples = ?, updated_at = CURRENT_TIMESTAMP
+            SET title = ?, members = ?, expenses = ?, bank_info = ?, couples = ?, rates = ?, updated_at = CURRENT_TIMESTAMP
             WHERE event_code = ?
         ''', (
             data.get('title', 'Sự Kiện Mới'),
@@ -166,6 +177,7 @@ def update_event(event_code):
             json.dumps(data.get('expenses', [])),
             json.dumps(data.get('bankInfo', {})),
             json.dumps(data.get('couples', [])),
+            json.dumps(data.get('rates', {})),
             event_code
         ))
         
@@ -180,6 +192,48 @@ def update_event(event_code):
         
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+def _fetch_vietcombank_rates(date_str):
+    """Gọi API tỷ giá Vietcombank. Trả về dict: {currencyCode: {cash, transfer, sell, currencyName}}"""
+    url = f'https://vietcombank.com.vn/api/exchangerates?date={date_str}'
+    req = Request(url, headers={
+        'accept': '*/*',
+        'referer': 'https://vietcombank.com.vn/vi-VN/KHCN/Cong-cu-Tien-ich/Ty-gia',
+        'user-agent': 'Mozilla/5.0',
+    })
+    with urlopen(req, timeout=10) as resp:
+        raw = resp.read().decode('utf-8')
+    payload = json.loads(raw)
+    rates = {}
+    for item in payload.get('Data', []) or []:
+        code = item.get('currencyCode')
+        if not code:
+            continue
+        rates[code] = {
+            'currencyName': item.get('currencyName', ''),
+            'cash': float(item.get('cash') or 0) or None,
+            'transfer': float(item.get('transfer') or 0) or None,
+            'sell': float(item.get('sell') or 0) or None,
+        }
+    return {
+        'date': payload.get('Date'),
+        'updatedDate': payload.get('UpdatedDate'),
+        'rates': rates,
+    }
+
+
+@app.route('/api/exchange-rates')
+def get_exchange_rates():
+    """Lấy tỷ giá từ Vietcombank cho 1 ngày cụ thể (hoặc hôm nay)"""
+    date_str = request.args.get('date') or datetime.now().strftime('%Y-%m-%d')
+    try:
+        data = _fetch_vietcombank_rates(date_str)
+        return jsonify({'success': True, **data})
+    except (HTTPError, URLError) as e:
+        return jsonify({'success': False, 'error': f'Không kết nối được Vietcombank: {e}'}), 502
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/api/banks')
 def get_banks():
