@@ -2583,13 +2583,13 @@
             $('#expenseCurrency').val(curEdit);
 
             // Xử lý checkbox thêm 3 số 0 khi edit (chỉ áp dụng ý nghĩa cho VND)
-            const amount = expense.amount.toString();
-            if (curEdit === 'VND' && amount.endsWith('000')) {
+            const amountNum = Number(expense.amount);
+            if (curEdit === 'VND' && amountNum % 1000 === 0 && amountNum !== 0) {
                 $('#addZerosCheckbox').prop('checked', true);
-                $('#expenseAmount').val(amount);
+                $('#expenseAmount').val(amountNum / 1000);
             } else {
                 $('#addZerosCheckbox').prop('checked', false);
-                $('#expenseAmount').val(amount);
+                $('#expenseAmount').val(amountNum);
             }
 
             // Khôi phục ngày phát sinh và created_time khi chỉnh sửa
