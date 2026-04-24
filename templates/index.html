@@ -355,8 +355,9 @@
                                 </div>
                             </div>
                             <div class="row">
-                                <div class="col-12 d-flex align-items-end">
-                                    <button type="submit" class="btn btn-primary w-100">Thêm Chi Phí</button>
+                                <div class="col-12 d-flex align-items-end gap-2">
+                                    <button type="submit" class="btn btn-primary flex-grow-1" id="expenseSubmitBtn">Thêm Chi Phí</button>
+                                    <button type="button" class="btn btn-outline-secondary d-none" id="cancelEditExpenseBtn">Huỷ</button>
                                 </div>
                             </div>
                         </form>
@@ -685,6 +686,7 @@
         let currentEventCode = localStorage.getItem('currentEventCode') || null;
         let members = [];
         let expenses = [];
+        let editingExpenseIndex = null; // index của expense đang sửa, null = đang thêm mới
         let bankInfo = {};
         let couples = []; // [{id, label, members:[names], primary:name}]
         let couplesDraft = []; // bản nháp khi đang mở modal, chỉ commit khi bấm Lưu
@@ -1164,6 +1166,7 @@
             $('#eventCodeDisplay').text('');
             members = [];
             expenses = [];
+            editingExpenseIndex = null;
             bankInfo = {};
             couples = [];
             rates = {};
@@ -1268,6 +1271,9 @@
 
                         // Cập nhật chi phí
                         expenses = eventData.expenses || [];
+                        editingExpenseIndex = null;
+                        $('#expenseSubmitBtn').text('Thêm Chi Phí');
+                        $('#cancelEditExpenseBtn').addClass('d-none');
                         renderExpenses();
 
                         // Cập nhật thông tin ngân hàng
@@ -1887,7 +1893,7 @@
             const expenseDate = $('#expenseDate').val() || todayISODate();
             const createdTime = $('#expenseCreatedTime').val() || nowIso;
 
-            expenses.push({
+            const expenseData = {
                 title: title,
                 amount: parseFloat(amount),
                 currency: currency,
@@ -1897,28 +1903,40 @@
                 expense_date: expenseDate,
                 created_time: createdTime,
                 updated_time: nowIso
-            });
+            };
 
-            renderExpenses();
+            if (editingExpenseIndex !== null && expenses[editingExpenseIndex]) {
+                // Cập nhật tại chỗ, giữ created_time gốc
+                expenseData.created_time = expenses[editingExpenseIndex].created_time || createdTime;
+                expenses[editingExpenseIndex] = expenseData;
+            } else {
+                expenses.push(expenseData);
+            }
 
-            // Xóa trắng các trường input (giữ lại Người thanh toán và Thanh toán cho ai để đỡ thao tác)
-            $('#expenseTitle').val('');
-            $('#expenseAmount').val('');
-            resetExpenseDateInput();
+            // Thoát edit mode (cũng reset form & re-render)
+            exitEditExpenseMode();
 
-            // Cập nhật preview sau khi reset
-            updateAmountPreview();
-
-            // Tự động lưu sau khi thêm chi phí
+            // Tự động lưu sau khi thêm/cập nhật chi phí
             saveEvent(false);
         });
 
         // Xử lý xóa chi phí
         $(document).on('click', '.delete-expense', function () {
             if (!allowEdit) return; // Không cho phép xóa nếu ở chế độ chỉ xem
-            
+
             const index = $(this).data('index');
             expenses.splice(index, 1);
+
+            // Đồng bộ editingExpenseIndex nếu đang ở edit mode
+            if (editingExpenseIndex !== null) {
+                if (editingExpenseIndex === index) {
+                    // Xoá chính expense đang sửa → thoát edit mode
+                    exitEditExpenseMode();
+                } else if (editingExpenseIndex > index) {
+                    editingExpenseIndex -= 1;
+                }
+            }
+
             renderExpenses();
 
             // Tự động lưu sau khi xóa chi phí
@@ -2520,9 +2538,24 @@
             showToast('Đã sao chép link có thể chỉnh sửa thành công!', 'success');
         });
 
+        function exitEditExpenseMode() {
+            editingExpenseIndex = null;
+            $('#expenseSubmitBtn').text('Thêm Chi Phí');
+            $('#cancelEditExpenseBtn').addClass('d-none');
+            $('#expenseTitle').val('');
+            $('#expenseAmount').val('');
+            resetExpenseDateInput();
+            updateAmountPreview();
+            renderExpenses();
+        }
+
+        $('#cancelEditExpenseBtn').on('click', function () {
+            exitEditExpenseMode();
+        });
+
         $(document).on('click', '.edit-expense', function () {
             if (!allowEdit) return; // Không cho phép chỉnh sửa nếu ở chế độ chỉ xem
-            
+
             const index = $(this).data('index');
             const expense = expenses[index];
 
@@ -2563,8 +2596,10 @@
                 }, 100);
             }
 
-            // Xóa chi phí cũ
-            expenses.splice(index, 1);
+            // Bật edit mode: giữ nguyên expense trong mảng, chỉ đánh dấu index đang sửa
+            editingExpenseIndex = index;
+            $('#expenseSubmitBtn').text('Cập nhật Chi Phí');
+            $('#cancelEditExpenseBtn').removeClass('d-none');
             renderExpenses();
 
             // Cuộn lên form để người dùng có thể chỉnh sửa
