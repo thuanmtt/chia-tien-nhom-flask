@@ -1925,6 +1925,16 @@
             if (!allowEdit) return; // Không cho phép xóa nếu ở chế độ chỉ xem
 
             const index = $(this).data('index');
+            const expense = expenses[index];
+            if (!expense) return;
+
+            const title = expense.title || '(không có tên)';
+            const cur = getCurrencyOfExpense(expense) || 'VND';
+            const amountDisplay = new Intl.NumberFormat('vi-VN').format(Math.round(expense.amount || 0)) + ' ' + cur;
+            if (!confirm(`Bạn có chắc chắn muốn xoá chi phí "${title}" (${amountDisplay})?`)) {
+                return;
+            }
+
             expenses.splice(index, 1);
 
             // Đồng bộ editingExpenseIndex nếu đang ở edit mode
