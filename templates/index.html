@@ -331,6 +331,13 @@
                                     </select>
                                 </div>
                             </div>
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-6">
+                                    <label for="expenseDate" class="form-label">Ngày phát sinh</label>
+                                    <input type="date" class="form-control" id="expenseDate" name="expenseDate">
+                                </div>
+                            </div>
+                            <input type="hidden" id="expenseCreatedTime" value="">
                             <div class="row g-3 mb-3" id="beneficiariesContainer" style="display: none;">
                                 <div class="col-12">
                                     <div class="d-flex justify-content-between align-items-center">
@@ -725,6 +732,34 @@
 
         function getCurrencyOfExpense(expense) {
             return (expense && expense.currency) ? expense.currency : 'VND';
+        }
+
+        function todayISODate() {
+            const d = new Date();
+            const yyyy = d.getFullYear();
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            const dd = String(d.getDate()).padStart(2, '0');
+            return `${yyyy}-${mm}-${dd}`;
+        }
+
+        function formatDateTimeForDisplay(isoString) {
+            if (!isoString) return '';
+            const d = new Date(isoString);
+            if (isNaN(d.getTime())) return isoString;
+            const pad = n => String(n).padStart(2, '0');
+            return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        }
+
+        function formatExpenseDateForDisplay(dateStr) {
+            if (!dateStr) return '';
+            const parts = dateStr.split('-');
+            if (parts.length !== 3) return dateStr;
+            return `${parts[2]}/${parts[1]}/${parts[0]}`;
+        }
+
+        function resetExpenseDateInput() {
+            $('#expenseDate').val(todayISODate());
+            $('#expenseCreatedTime').val('');
         }
 
         function getRateToVND(currencyCode) {
@@ -1348,14 +1383,32 @@
                         : `${base} <span class="text-danger small">(chưa có tỷ giá)</span>`;
                 }
 
+                const expenseDateBadge = expense.expense_date
+                    ? `<span class="badge bg-light text-dark border ms-2" style="font-weight:500;"><i class="fas fa-calendar-day me-1"></i>${formatExpenseDateForDisplay(expense.expense_date)}</span>`
+                    : '';
+                const timeInfoParts = [];
+                if (expense.created_time) {
+                    timeInfoParts.push(`<span><i class="fas fa-plus-circle me-1"></i>Tạo: ${formatDateTimeForDisplay(expense.created_time)}</span>`);
+                }
+                if (expense.updated_time && expense.updated_time !== expense.created_time) {
+                    timeInfoParts.push(`<span><i class="fas fa-pen me-1"></i>Cập nhật: ${formatDateTimeForDisplay(expense.updated_time)}</span>`);
+                }
+                const timeInfoDisplay = timeInfoParts.length
+                    ? `<div class="mt-1 small text-muted d-flex flex-wrap gap-2">${timeInfoParts.join('')}</div>`
+                    : '';
+
                 $('#expensesList').append(`
         <div class="expense-item p-2">
             <div class="d-flex justify-content-between align-items-center">
                 <div>
-                    <h6 class="mb-1">${expense.title}</h6>
+                    <h6 class="mb-1 d-flex align-items-center flex-wrap">
+                        <span>${expense.title}</span>
+                        ${expenseDateBadge}
+                    </h6>
                     <p class="mb-0 text-muted">
                         <small>${expense.payer} đã thanh toán ${amountDisplay} ${benefitInfo}</small>
                     </p>
+                    ${timeInfoDisplay}
                 </div>
                 <div style="${!allowEdit ? 'display: none;' : ''}">
                     <span class="action-btn edit-expense" data-index="${index}">
@@ -1829,13 +1882,20 @@
                 return;
             }
 
+            const nowIso = new Date().toISOString();
+            const expenseDate = $('#expenseDate').val() || todayISODate();
+            const createdTime = $('#expenseCreatedTime').val() || nowIso;
+
             expenses.push({
                 title: title,
                 amount: parseFloat(amount),
                 currency: currency,
                 payer: payer,
                 benefitType: benefitType,
-                beneficiaries: beneficiaries
+                beneficiaries: beneficiaries,
+                expense_date: expenseDate,
+                created_time: createdTime,
+                updated_time: nowIso
             });
 
             renderExpenses();
@@ -1843,6 +1903,7 @@
             // Xóa trắng các trường input (giữ lại Người thanh toán và Thanh toán cho ai để đỡ thao tác)
             $('#expenseTitle').val('');
             $('#expenseAmount').val('');
+            resetExpenseDateInput();
 
             // Cập nhật preview sau khi reset
             updateAmountPreview();
@@ -2484,7 +2545,11 @@
                 $('#addZerosCheckbox').prop('checked', false);
                 $('#expenseAmount').val(amount);
             }
-            
+
+            // Khôi phục ngày phát sinh và created_time khi chỉnh sửa
+            $('#expenseDate').val(expense.expense_date || todayISODate());
+            $('#expenseCreatedTime').val(expense.created_time || '');
+
             // Cập nhật preview sau khi set giá trị
             updateAmountPreview();
 
@@ -2534,6 +2599,7 @@
         
         // Cập nhật UI ngay sau khi khởi tạo
         updateUIForEditMode();
+        resetExpenseDateInput();
     });
 </script>
 <script>
