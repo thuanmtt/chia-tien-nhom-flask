@@ -1383,9 +1383,13 @@
             // Sắp xếp danh sách chi phí theo thứ tự hiện tại
             const sortedExpenses = sortExpenses();
 
-            sortedExpenses.forEach(function (expense, originalIndex) {
+            sortedExpenses.forEach(function (expense, displayIndex) {
                 // Tìm index gốc trong mảng expenses
                 const index = expenses.indexOf(expense);
+                // Số thứ tự: cũ→mới hiển thị 1..n, mới→cũ hiển thị n..1
+                const stt = sortOrder === 'newest'
+                    ? expenses.length - displayIndex
+                    : displayIndex + 1;
                 let benefitInfo = '';
                 if (expense.benefitType === 'all') {
                     benefitInfo = 'cho tất cả mọi người';
@@ -1432,6 +1436,7 @@
             <div class="d-flex justify-content-between align-items-center">
                 <div>
                     <h6 class="mb-1 d-flex align-items-center flex-wrap">
+                        <span class="badge bg-secondary me-2">${stt}</span>
                         <span>${expense.title}</span>
                         ${expenseDateBadge}
                     </h6>
