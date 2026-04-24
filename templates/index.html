@@ -363,7 +363,7 @@
                         </form>
                     </div>
                     <div class="expenses-list mt-4">
-                        <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
                             <h6 class="mb-0">Danh sách chi phí</h6>
                             <div class="btn-group" role="group">
                                 <button type="button" class="btn btn-sm btn-outline-secondary" id="sortExpensesBtn" title="Sắp xếp danh sách">
@@ -371,6 +371,10 @@
                                     <span id="sortText">Mới nhất</span>
                                 </button>
                             </div>
+                        </div>
+                        <div id="expensesSummary" class="small text-muted mb-2 d-none">
+                            <span><i class="fas fa-receipt me-1"></i>Số chi phí: <strong id="expensesCount">0</strong></span>
+                            <span class="ms-3"><i class="fas fa-coins me-1"></i>Tổng chi phí: <strong id="expensesTotal">0 VND</strong></span>
                         </div>
                         <div id="expensesList"></div>
                     </div>
@@ -1354,10 +1358,27 @@
             $('#expensesList').empty();
 
             if (expenses.length === 0) {
+                $('#expensesSummary').addClass('d-none');
                 $('#expensesList').append('<p class="text-muted">Chưa có chi phí nào.</p>');
                 autoCalculate();
                 return;
             }
+
+            // Tính tổng chi phí (quy đổi về VND)
+            let totalVND = 0;
+            let hasMissingRate = false;
+            expenses.forEach(e => {
+                const vnd = amountInVND(e);
+                if (vnd === null) {
+                    hasMissingRate = true;
+                } else {
+                    totalVND += vnd;
+                }
+            });
+            $('#expensesCount').text(expenses.length);
+            const totalText = formatCurrency(totalVND) + (hasMissingRate ? ' <span class="text-danger">(thiếu tỷ giá)</span>' : '');
+            $('#expensesTotal').html(totalText);
+            $('#expensesSummary').removeClass('d-none');
 
             // Sắp xếp danh sách chi phí theo thứ tự hiện tại
             const sortedExpenses = sortExpenses();
