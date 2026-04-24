@@ -1153,8 +1153,10 @@
             updateAmountPreview();
         });
 
-        // Đổi tiền tệ → cập nhật preview
+        // Đổi tiền tệ → mặc định bật +K cho VND, tắt cho ngoại tệ; cập nhật preview
         $('#expenseCurrency').on('change', function () {
+            const currency = $(this).val() || 'VND';
+            $('#addZerosCheckbox').prop('checked', currency === 'VND');
             updateAmountPreview();
         });
 
