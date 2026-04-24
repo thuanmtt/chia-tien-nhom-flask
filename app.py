@@ -193,8 +193,25 @@ def update_event(event_code):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+CURRENCY_NAME_VI = {
+    'USD': 'US Dollar', 'EUR': 'Euro', 'JPY': 'Japanese Yen', 'GBP': 'UK Pound',
+    'KRW': 'Korean Won', 'THB': 'Thai Baht', 'SGD': 'Singapore Dollar',
+    'CNY': 'Chinese Yuan', 'AUD': 'Australian Dollar', 'CAD': 'Canadian Dollar',
+    'HKD': 'Hong Kong Dollar', 'TWD': 'Taiwan Dollar', 'MYR': 'Malaysian Ringgit',
+    'CHF': 'Swiss Franc', 'NZD': 'New Zealand Dollar', 'RUB': 'Russian Ruble',
+    'INR': 'Indian Rupee', 'IDR': 'Indonesian Rupiah', 'PHP': 'Philippine Peso',
+    'LAK': 'Lao Kip', 'KHR': 'Cambodian Riel', 'MOP': 'Macanese Pataca',
+}
+
+
+def _http_get_json(url, timeout=10):
+    req = Request(url, headers={'accept': 'application/json', 'user-agent': 'Mozilla/5.0'})
+    with urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode('utf-8'))
+
+
 def _fetch_vietcombank_rates(date_str):
-    """Gọi API tỷ giá Vietcombank. Trả về dict: {currencyCode: {cash, transfer, sell, currencyName}}"""
+    """API tỷ giá Vietcombank — trả về cash/transfer/sell theo từng mã."""
     url = f'https://vietcombank.com.vn/api/exchangerates?date={date_str}'
     req = Request(url, headers={
         'accept': '*/*',
@@ -202,8 +219,7 @@ def _fetch_vietcombank_rates(date_str):
         'user-agent': 'Mozilla/5.0',
     })
     with urlopen(req, timeout=10) as resp:
-        raw = resp.read().decode('utf-8')
-    payload = json.loads(raw)
+        payload = json.loads(resp.read().decode('utf-8'))
     rates = {}
     for item in payload.get('Data', []) or []:
         code = item.get('currencyCode')
@@ -216,19 +232,118 @@ def _fetch_vietcombank_rates(date_str):
             'sell': float(item.get('sell') or 0) or None,
         }
     return {
-        'date': payload.get('Date'),
+        'date': (payload.get('Date') or date_str)[:10],
         'updatedDate': payload.get('UpdatedDate'),
         'rates': rates,
     }
 
 
+def _vcb_with_rate(vcb_data, rate_type):
+    """Gán trường `rate` cho từng currency dựa vào rate_type (mid = (transfer+sell)/2)."""
+    out = {}
+    for code, v in (vcb_data.get('rates') or {}).items():
+        transfer = v.get('transfer')
+        sell = v.get('sell')
+        cash = v.get('cash')
+        if rate_type == 'mid':
+            if transfer and sell:
+                rate = (transfer + sell) / 2.0
+            else:
+                rate = transfer or sell or cash
+        elif rate_type == 'cash':
+            rate = cash
+        elif rate_type == 'sell':
+            rate = sell
+        else:
+            rate = transfer
+        if not rate:
+            continue
+        out[code] = {
+            'currencyName': v.get('currencyName', ''),
+            'rate': rate,
+            'cash': cash,
+            'transfer': transfer,
+            'sell': sell,
+        }
+    return {'date': vcb_data.get('date'), 'rates': out}
+
+
+def _fetch_fawaz_rates(date_str):
+    """Fawazahmed0 Currency API — mid-market, hỗ trợ ngày lịch sử."""
+    tag = date_str if date_str and date_str != datetime.now().strftime('%Y-%m-%d') else 'latest'
+    url = f'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@{tag}/v1/currencies/usd.json'
+    payload = _http_get_json(url)
+    usd = payload.get('usd') or {}
+    vnd_per_usd = usd.get('vnd')
+    if not vnd_per_usd:
+        raise ValueError('Fawazahmed0: thiếu tỷ giá VND')
+    rates = {}
+    for code_lower, usd_to_code in usd.items():
+        code = code_lower.upper()
+        if code == 'VND' or not usd_to_code:
+            continue
+        rate = vnd_per_usd / usd_to_code
+        rates[code] = {
+            'currencyName': CURRENCY_NAME_VI.get(code, ''),
+            'rate': rate,
+        }
+    return {'date': payload.get('date') or date_str, 'rates': rates}
+
+
+def _fetch_erapi_rates(_date_str):
+    """open.er-api.com — free, mid-market, chỉ có latest."""
+    payload = _http_get_json('https://open.er-api.com/v6/latest/USD')
+    if payload.get('result') != 'success':
+        raise ValueError('exchangerate-api: response không hợp lệ')
+    r = payload.get('rates') or {}
+    vnd_per_usd = r.get('VND')
+    if not vnd_per_usd:
+        raise ValueError('exchangerate-api: thiếu tỷ giá VND')
+    rates = {}
+    for code, usd_to_code in r.items():
+        if code == 'VND' or not usd_to_code:
+            continue
+        rate = vnd_per_usd / usd_to_code
+        rates[code] = {
+            'currencyName': CURRENCY_NAME_VI.get(code, ''),
+            'rate': rate,
+        }
+    updated = payload.get('time_last_update_utc') or ''
+    date_out = datetime.utcnow().strftime('%Y-%m-%d')
+    return {'date': date_out, 'updatedDate': updated, 'rates': rates}
+
+
 @app.route('/api/exchange-rates')
 def get_exchange_rates():
-    """Lấy tỷ giá từ Vietcombank cho 1 ngày cụ thể (hoặc hôm nay)"""
+    """Lấy tỷ giá. type=mid dùng fallback chain fawaz→erapi→vcb-mid; còn lại dùng Vietcombank."""
     date_str = request.args.get('date') or datetime.now().strftime('%Y-%m-%d')
+    rate_type = (request.args.get('type') or 'mid').lower()
+
+    if rate_type == 'mid':
+        errors = []
+        for fetch, name in (
+            (_fetch_fawaz_rates, 'fawazahmed0'),
+            (_fetch_erapi_rates, 'exchangerate-api'),
+        ):
+            try:
+                data = fetch(date_str)
+                return jsonify({'success': True, 'source': name, 'rateType': 'mid', **data})
+            except Exception as e:
+                errors.append(f'{name}: {e}')
+        try:
+            vcb = _fetch_vietcombank_rates(date_str)
+            data = _vcb_with_rate(vcb, 'mid')
+            return jsonify({'success': True, 'source': 'vietcombank-mid', 'rateType': 'mid', **data})
+        except Exception as e:
+            errors.append(f'vietcombank: {e}')
+        return jsonify({'success': False, 'error': 'Tất cả nguồn đều lỗi — ' + ' | '.join(errors)}), 502
+
+    if rate_type not in ('transfer', 'cash', 'sell'):
+        rate_type = 'transfer'
     try:
-        data = _fetch_vietcombank_rates(date_str)
-        return jsonify({'success': True, **data})
+        vcb = _fetch_vietcombank_rates(date_str)
+        data = _vcb_with_rate(vcb, rate_type)
+        return jsonify({'success': True, 'source': 'vietcombank', 'rateType': rate_type, **data})
     except (HTTPError, URLError) as e:
         return jsonify({'success': False, 'error': f'Không kết nối được Vietcombank: {e}'}), 502
     except Exception as e:

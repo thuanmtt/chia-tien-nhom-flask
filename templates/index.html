@@ -560,24 +560,25 @@
             </div>
             <div class="modal-body">
                 <p class="text-muted small mb-3">
-                    Tỷ giá = 1 đơn vị ngoại tệ tương đương bao nhiêu VND. Mặc định lấy tỷ giá <strong>chuyển khoản</strong> của Vietcombank.
+                    Tỷ giá = 1 đơn vị ngoại tệ tương đương bao nhiêu VND. Mặc định dùng tỷ giá <strong>thị trường (mid-market)</strong> — gần với giá thật nhất.
                 </p>
                 <div class="row g-2 mb-3">
                     <div class="col-sm-5">
-                        <label class="form-label small mb-1">Ngày tỷ giá (Vietcombank)</label>
+                        <label class="form-label small mb-1">Ngày tỷ giá</label>
                         <input type="date" class="form-control form-control-sm" id="ratesDate">
                     </div>
                     <div class="col-sm-4">
                         <label class="form-label small mb-1">Loại tỷ giá</label>
                         <select class="form-select form-select-sm" id="ratesType">
-                            <option value="transfer" selected>Chuyển khoản</option>
-                            <option value="cash">Tiền mặt (mua vào)</option>
-                            <option value="sell">Bán ra</option>
+                            <option value="mid" selected>Thị trường (mid-market)</option>
+                            <option value="transfer">VCB - Chuyển khoản</option>
+                            <option value="cash">VCB - Tiền mặt (mua vào)</option>
+                            <option value="sell">VCB - Bán ra</option>
                         </select>
                     </div>
                     <div class="col-sm-3 d-flex align-items-end">
                         <button type="button" class="btn btn-sm btn-primary w-100" id="fetchRatesBtn">
-                            <i class="fas fa-sync-alt me-1"></i>Lấy từ VCB
+                            <i class="fas fa-sync-alt me-1"></i>Lấy tỷ giá
                         </button>
                     </div>
                 </div>
@@ -679,7 +680,24 @@
         let bankInfo = {};
         let couples = []; // [{id, label, members:[names], primary:name}]
         let couplesDraft = []; // bản nháp khi đang mở modal, chỉ commit khi bấm Lưu
-        let rates = {}; // { [currencyCode]: { rate: Number, source: 'vietcombank'|'custom', rateDate: 'YYYY-MM-DD', rateType: 'transfer'|... } } — 1 đơn vị = rate VND
+        let rates = {}; // { [currencyCode]: { rate: Number, source: 'fawazahmed0'|'exchangerate-api'|'vietcombank'|'vietcombank-mid'|'custom'|'missing', rateDate: 'YYYY-MM-DD', rateType: 'mid'|'transfer'|... } } — 1 đơn vị = rate VND
+        const API_SOURCES = new Set(['fawazahmed0', 'exchangerate-api', 'vietcombank', 'vietcombank-mid']);
+        const SOURCE_BADGE_SHORT = {
+            'fawazahmed0': 'Fawaz',
+            'exchangerate-api': 'ER-API',
+            'vietcombank': 'VCB',
+            'vietcombank-mid': 'VCB·mid',
+        };
+        function renderSourceBadge(entry) {
+            if (!entry) return '<span class="badge bg-warning text-dark">Chưa có</span>';
+            if (API_SOURCES.has(entry.source)) {
+                const label = SOURCE_BADGE_SHORT[entry.source] || 'API';
+                const dateStr = entry.rateDate ? ` (${entry.rateDate})` : '';
+                return `<span class="badge bg-primary">${label}${dateStr}</span>`;
+            }
+            if (entry.source === 'custom') return '<span class="badge bg-secondary">Tùy chỉnh</span>';
+            return '<span class="badge bg-warning text-dark">Chưa có</span>';
+        }
         let ratesDraft = {}; // bản nháp khi mở modal
         let sortOrder = 'newest'; // 'newest' hoặc 'oldest'
         let allowEdit = true; // Mặc định cho phép sửa
@@ -2033,22 +2051,14 @@
             });
             codes.sort();
             if (codes.length === 0) {
-                $tb.append('<tr><td colspan="5" class="text-center text-muted">Chưa có ngoại tệ nào. Thêm ở ô bên dưới hoặc bấm "Lấy từ VCB".</td></tr>');
+                $tb.append('<tr><td colspan="5" class="text-center text-muted">Chưa có ngoại tệ nào. Thêm ở ô bên dưới hoặc bấm "Lấy tỷ giá".</td></tr>');
                 return;
             }
             codes.forEach(code => {
                 const entry = ratesDraft[code] || {};
                 const rateVal = (typeof entry.rate === 'number' && entry.rate > 0) ? entry.rate : '';
                 const name = CURRENCY_NAME[code] || entry.currencyName || '';
-                let sourceBadge;
-                if (entry.source === 'vietcombank') {
-                    const dateStr = entry.rateDate ? ` (${entry.rateDate})` : '';
-                    sourceBadge = `<span class="badge bg-primary">VCB${dateStr}</span>`;
-                } else if (entry.source === 'custom') {
-                    sourceBadge = '<span class="badge bg-secondary">Tùy chỉnh</span>';
-                } else {
-                    sourceBadge = '<span class="badge bg-warning text-dark">Chưa có</span>';
-                }
+                const sourceBadge = renderSourceBadge(entry);
                 $tb.append(`
                     <tr data-code="${code}">
                         <td><strong>${code}</strong></td>
@@ -2080,46 +2090,63 @@
         $('#configRatesBtn').click(openRatesModal);
         $('#openRatesFromFormBtn').click(openRatesModal);
 
+        const SOURCE_LABEL = {
+            'fawazahmed0': 'Fawazahmed0 (mid-market)',
+            'exchangerate-api': 'exchangerate-api.com (mid-market)',
+            'vietcombank-mid': 'Vietcombank (trung bình mua-bán)',
+            'vietcombank': 'Vietcombank',
+        };
+        const RATE_TYPE_LABEL = {
+            'mid': 'thị trường',
+            'transfer': 'chuyển khoản',
+            'cash': 'tiền mặt',
+            'sell': 'bán ra',
+        };
+
         $('#fetchRatesBtn').click(function () {
             const date = $('#ratesDate').val() || todayYYYYMMDD();
-            const rateType = $('#ratesType').val() || 'transfer';
+            const rateType = $('#ratesType').val() || 'mid';
             const $btn = $(this);
             $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Đang lấy...');
             $('#ratesStatus').text('');
             $.ajax({
-                url: '/api/exchange-rates?date=' + encodeURIComponent(date),
+                url: '/api/exchange-rates?date=' + encodeURIComponent(date) + '&type=' + encodeURIComponent(rateType),
                 method: 'GET',
                 success: function (resp) {
                     if (!resp.success) {
                         $('#ratesStatus').html(`<span class="text-danger">${resp.error || 'Lỗi không xác định'}</span>`);
                         return;
                     }
-                    const vcb = resp.rates || {};
+                    const src = resp.rates || {};
                     const codesToUpdate = new Set([
                         ...Object.keys(ratesDraft),
                         ...collectCurrenciesFromExpenses(),
                     ]);
-                    // Nếu chưa có gì, lấy các currency thông dụng được Vietcombank trả về
+                    // Nếu chưa có gì, lấy các currency thông dụng mà nguồn trả về
                     if (codesToUpdate.size === 0) {
-                        Object.keys(vcb).forEach(c => codesToUpdate.add(c));
+                        COMMON_CURRENCIES.forEach(c => {
+                            if (c.code !== 'VND' && src[c.code]) codesToUpdate.add(c.code);
+                        });
                     }
                     let updated = 0, missing = [];
                     codesToUpdate.forEach(code => {
                         if (code === 'VND') return;
-                        const src = vcb[code];
-                        if (!src) { missing.push(code); return; }
-                        const rate = src[rateType];
+                        const entry = src[code];
+                        if (!entry) { missing.push(code); return; }
+                        const rate = entry.rate || entry[rateType];
                         if (!rate || rate <= 0) { missing.push(code); return; }
                         ratesDraft[code] = {
                             rate: rate,
-                            source: 'vietcombank',
+                            source: resp.source || 'api',
                             rateDate: (resp.date || date || '').slice(0, 10),
-                            rateType: rateType,
-                            currencyName: src.currencyName || CURRENCY_NAME[code] || '',
+                            rateType: resp.rateType || rateType,
+                            currencyName: entry.currencyName || CURRENCY_NAME[code] || '',
                         };
                         updated++;
                     });
-                    let msg = `Đã cập nhật ${updated} tỷ giá từ Vietcombank (${rateType}, ngày ${(resp.date || date || '').slice(0, 10)}).`;
+                    const srcLabel = SOURCE_LABEL[resp.source] || resp.source || 'API';
+                    const typeLabel = RATE_TYPE_LABEL[resp.rateType || rateType] || rateType;
+                    let msg = `Đã cập nhật ${updated} tỷ giá từ <strong>${srcLabel}</strong> (${typeLabel}, ngày ${(resp.date || date || '').slice(0, 10)}).`;
                     if (missing.length > 0) msg += ` Không có tỷ giá cho: ${missing.join(', ')}.`;
                     $('#ratesStatus').html(`<span class="text-success">${msg}</span>`);
                     renderRatesTable();
@@ -2130,7 +2157,7 @@
                     $('#ratesStatus').html(`<span class="text-danger">${err}</span>`);
                 },
                 complete: function () {
-                    $btn.prop('disabled', false).html('<i class="fas fa-sync-alt me-1"></i>Lấy từ VCB');
+                    $btn.prop('disabled', false).html('<i class="fas fa-sync-alt me-1"></i>Lấy tỷ giá');
                 }
             });
         });
@@ -2141,29 +2168,20 @@
             if (!ratesDraft[code]) ratesDraft[code] = {};
             if (!isNaN(v) && v > 0) {
                 const previous = ratesDraft[code];
+                // Giữ nguyên source nếu user không sửa rate; đổi sang custom nếu sửa khác
+                const keepSource = previous && API_SOURCES.has(previous.source) && previous.rate === v;
                 ratesDraft[code] = {
                     ...previous,
                     rate: v,
-                    // Nếu người dùng gõ khác với rate vừa lấy từ VCB, đánh dấu là custom
-                    source: (previous && previous.source === 'vietcombank' && previous.rate === v) ? 'vietcombank' : 'custom',
+                    source: keepSource ? previous.source : 'custom',
                 };
             } else {
                 ratesDraft[code].rate = null;
                 ratesDraft[code].source = 'missing';
             }
-            // Re-render badge only (tránh mất focus input) — cập nhật badge của row hiện tại
+            // Re-render badge only (tránh mất focus input)
             const $row = $(this).closest('tr');
-            const entry = ratesDraft[code];
-            let badge;
-            if (entry.source === 'vietcombank') {
-                const dateStr = entry.rateDate ? ` (${entry.rateDate})` : '';
-                badge = `<span class="badge bg-primary">VCB${dateStr}</span>`;
-            } else if (entry.source === 'custom') {
-                badge = '<span class="badge bg-secondary">Tùy chỉnh</span>';
-            } else {
-                badge = '<span class="badge bg-warning text-dark">Chưa có</span>';
-            }
-            $row.find('td').eq(3).html(badge);
+            $row.find('td').eq(3).html(renderSourceBadge(ratesDraft[code]));
         });
 
         $(document).on('click', '.rates-remove-btn', function () {
@@ -2193,7 +2211,7 @@
                 if (entry && typeof entry.rate === 'number' && entry.rate > 0) {
                     cleaned[code] = {
                         rate: entry.rate,
-                        source: entry.source === 'vietcombank' ? 'vietcombank' : 'custom',
+                        source: API_SOURCES.has(entry.source) ? entry.source : 'custom',
                         rateDate: entry.rateDate || null,
                         rateType: entry.rateType || null,
                         currencyName: entry.currencyName || CURRENCY_NAME[code] || '',
