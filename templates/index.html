@@ -387,17 +387,11 @@
                                 <span class="badge bg-secondary ms-1" id="dailyStatsDays">0</span>
                             </button>
                             <div class="collapse mt-2" id="dailyStatsBody">
-                                <div class="table-responsive">
-                                    <table class="table table-sm table-hover mb-0">
-                                        <thead>
-                                            <tr>
-                                                <th>Ngày phát sinh</th>
-                                                <th class="text-center">Số chi phí</th>
-                                                <th class="text-end">Tổng (VND)</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="dailyStatsTable"></tbody>
-                                    </table>
+                                <div id="dailyStatsMissingNote" class="small text-danger mb-2 d-none">
+                                    <i class="fas fa-triangle-exclamation me-1"></i>Một số chi phí thiếu tỷ giá nên chưa được tính vào biểu đồ.
+                                </div>
+                                <div style="position: relative; height: 280px;">
+                                    <canvas id="dailyStatsChart"></canvas>
                                 </div>
                             </div>
                         </div>
@@ -710,6 +704,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
     $(document).ready(function () {
         let currentEventCode = localStorage.getItem('currentEventCode') || null;
@@ -1379,52 +1374,105 @@
         }
 
         // Hàm hiển thị danh sách chi phí
+        let dailyStatsChartInstance = null;
+
         function renderDailyStats() {
             const $container = $('#dailyStatsContainer');
-            const $tbody = $('#dailyStatsTable');
-            $tbody.empty();
 
             if (!expenses.length) {
                 $container.addClass('d-none');
+                if (dailyStatsChartInstance) {
+                    dailyStatsChartInstance.destroy();
+                    dailyStatsChartInstance = null;
+                }
                 return;
             }
 
             const groups = {};
+            let anyMissing = false;
             expenses.forEach(e => {
                 const key = e.expense_date || '__no_date__';
-                if (!groups[key]) groups[key] = { count: 0, total: 0, missing: false };
+                if (!groups[key]) groups[key] = { count: 0, total: 0 };
                 groups[key].count += 1;
                 const vnd = amountInVND(e);
                 if (vnd === null) {
-                    groups[key].missing = true;
+                    anyMissing = true;
                 } else {
                     groups[key].total += vnd;
                 }
             });
 
+            // Sắp xếp tăng dần theo ngày để biểu đồ đọc trái→phải = cũ→mới
             const dateKeys = Object.keys(groups).sort((a, b) => {
                 if (a === '__no_date__') return 1;
                 if (b === '__no_date__') return -1;
-                return b.localeCompare(a);
+                return a.localeCompare(b);
             });
 
-            dateKeys.forEach(key => {
-                const g = groups[key];
-                const label = key === '__no_date__'
-                    ? '<span class="text-muted">Chưa có ngày</span>'
-                    : `<i class="fas fa-calendar-day me-1 text-muted"></i>${formatExpenseDateForDisplay(key)}`;
-                const totalCell = formatCurrency(g.total) + (g.missing ? ' <span class="text-danger small">(thiếu tỷ giá)</span>' : '');
-                $tbody.append(`
-                    <tr>
-                        <td>${label}</td>
-                        <td class="text-center">${g.count}</td>
-                        <td class="text-end">${totalCell}</td>
-                    </tr>
-                `);
-            });
+            const labels = dateKeys.map(k => k === '__no_date__' ? 'Chưa có ngày' : formatExpenseDateForDisplay(k));
+            const totals = dateKeys.map(k => groups[k].total);
+            const counts = dateKeys.map(k => groups[k].count);
 
             $('#dailyStatsDays').text(dateKeys.length);
+            $('#dailyStatsMissingNote').toggleClass('d-none', !anyMissing);
             $container.removeClass('d-none');
+
+            const ctx = document.getElementById('dailyStatsChart').getContext('2d');
+
+            if (dailyStatsChartInstance) {
+                dailyStatsChartInstance.data.labels = labels;
+                dailyStatsChartInstance.data.datasets[0].data = totals;
+                dailyStatsChartInstance.data.datasets[0]._counts = counts;
+                dailyStatsChartInstance.update();
+                return;
+            }
+
+            dailyStatsChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Tổng chi phí (VND)',
+                        data: totals,
+                        _counts: counts,
+                        backgroundColor: 'rgba(13, 110, 253, 0.6)',
+                        borderColor: 'rgba(13, 110, 253, 1)',
+                        borderWidth: 1,
+                        borderRadius: 4,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function (ctx) {
+                                    const cnt = ctx.dataset._counts ? ctx.dataset._counts[ctx.dataIndex] : 0;
+                                    return [
+                                        `Tổng: ${formatCurrency(ctx.parsed.y)}`,
+                                        `Số chi phí: ${cnt}`
+                                    ];
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function (value) {
+                                    if (value >= 1e9) return (value / 1e9).toFixed(1) + ' tỷ';
+                                    if (value >= 1e6) return (value / 1e6).toFixed(1) + ' tr';
+                                    if (value >= 1e3) return (value / 1e3).toFixed(0) + 'k';
+                                    return value;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
         }
 
         function renderExpenses() {
@@ -2055,6 +2103,11 @@
             // Tự động lưu sau khi xóa chi phí
             saveEvent(false);
             // Không cần gọi autoCalculate() vì đã được gọi trong renderExpenses()
+        });
+
+        // Resize biểu đồ thống kê khi mở collapse (canvas cần kích thước thật)
+        $('#dailyStatsBody').on('shown.bs.collapse', function () {
+            if (dailyStatsChartInstance) dailyStatsChartInstance.resize();
         });
 
         // Xử lý nút sắp xếp danh sách chi phí
