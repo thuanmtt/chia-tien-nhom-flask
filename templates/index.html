@@ -712,7 +712,8 @@
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"></script>
 <script>
     $(document).ready(function () {
         let currentEventCode = localStorage.getItem('currentEventCode') || null;
@@ -1593,13 +1594,62 @@
             XLSX.writeFile(wb, buildExportFilename('xlsx'));
         }
 
-        function exportExpensesToPDF() {
+        // Cache font Unicode (DejaVu Sans hỗ trợ tiếng Việt) cho jsPDF
+        let _pdfUnicodeFontPromise = null;
+        function ensurePdfUnicodeFont() {
+            if (_pdfUnicodeFontPromise) return _pdfUnicodeFontPromise;
+            _pdfUnicodeFontPromise = (async () => {
+                const urls = [
+                    'https://cdn.jsdelivr.net/npm/dejavu-fonts-ttf@2.37.3/ttf/DejaVuSans.ttf',
+                    'https://cdn.jsdelivr.net/gh/dejavu-fonts/dejavu-fonts@version_2_37/ttf/DejaVuSans.ttf',
+                ];
+                for (const url of urls) {
+                    try {
+                        const resp = await fetch(url);
+                        if (!resp.ok) continue;
+                        const buf = await resp.arrayBuffer();
+                        const bytes = new Uint8Array(buf);
+                        let bin = '';
+                        const chunk = 0x8000;
+                        for (let i = 0; i < bytes.length; i += chunk) {
+                            bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+                        }
+                        return btoa(bin);
+                    } catch (e) {
+                        // thử URL kế tiếp
+                    }
+                }
+                throw new Error('Không tải được font Unicode cho PDF');
+            })();
+            return _pdfUnicodeFontPromise;
+        }
+
+        async function exportExpensesToPDF() {
             if (!expenses.length) {
                 showToast('Chưa có chi phí để xuất.', 'warning');
                 return;
             }
-            if (typeof html2pdf === 'undefined') {
+            if (!window.jspdf || !window.jspdf.jsPDF) {
                 showToast('Thư viện xuất PDF chưa tải xong, vui lòng thử lại.', 'error');
+                return;
+            }
+
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+
+            let fontName = 'helvetica';
+            try {
+                const fontBase64 = await ensurePdfUnicodeFont();
+                doc.addFileToVFS('DejaVuSans.ttf', fontBase64);
+                doc.addFont('DejaVuSans.ttf', 'DejaVuSans', 'normal');
+                fontName = 'DejaVuSans';
+            } catch (e) {
+                console.warn(e);
+                showToast('Không tải được font tiếng Việt, PDF có thể hiển thị sai dấu.', 'warning');
+            }
+
+            if (typeof doc.autoTable !== 'function') {
+                showToast('Plugin bảng PDF chưa tải xong, vui lòng thử lại.', 'error');
                 return;
             }
 
@@ -1610,101 +1660,129 @@
             const title = ($('#eventTitle').text() || 'Chi phí').trim();
             const exportedAt = new Date().toLocaleString('vi-VN');
 
-            const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g, c => ({
-                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-            }[c]));
+            // Header
+            doc.setFont(fontName, 'normal');
+            doc.setFontSize(16);
+            doc.setTextColor(13, 110, 253);
+            doc.text(title, 14, 16);
+            doc.setFontSize(9);
+            doc.setTextColor(108, 117, 125);
+            doc.text('Xuất lúc: ' + exportedAt, 14, 22);
+            doc.setDrawColor(13, 110, 253);
+            doc.setLineWidth(0.4);
+            doc.line(14, 24, 196, 24);
 
-            const expenseTbody = expenseRows.map(r => {
-                const amountStr = `${formatAmountWithCurrency(r.amount, r.currency)}`;
-                const vndStr = r.amountVnd === null
-                    ? '<span style="color:#dc3545;">Thiếu tỷ giá</span>'
-                    : formatCurrency(r.amountVnd);
-                return `<tr>
-                    <td style="text-align:center;">${r.stt}</td>
-                    <td>${escapeHtml(r.title)}</td>
-                    <td style="text-align:right;">${escapeHtml(amountStr)}</td>
-                    <td style="text-align:right;">${vndStr}</td>
-                    <td>${escapeHtml(r.payer)}</td>
-                    <td>${escapeHtml(r.beneficiaries)}</td>
-                    <td style="text-align:center;">${escapeHtml(r.expenseDate ? formatExpenseDateForDisplay(r.expenseDate) : '-')}</td>
-                </tr>`;
-            }).join('');
+            doc.setFontSize(10);
+            doc.setTextColor(33, 37, 41);
+            const summaryLine = `Số chi phí: ${expenseRows.length}    Tổng (VND): ${formatCurrency(totalVnd)}`
+                + (hasMissing ? '   (một số khoản thiếu tỷ giá)' : '');
+            doc.text(summaryLine, 14, 30);
 
-            const dailyTbody = dailyRows.map(r => `<tr>
-                <td>${escapeHtml(r.date === 'Chưa có ngày' ? r.date : formatExpenseDateForDisplay(r.date))}</td>
-                <td style="text-align:center;">${r.count}</td>
-                <td style="text-align:right;">${formatCurrency(r.total)}${r.missing ? ' <span style="color:#dc3545;">*</span>' : ''}</td>
-            </tr>`).join('');
+            doc.setFontSize(12);
+            doc.text('Danh sách chi phí', 14, 38);
 
-            const html = `
-                <div style="font-family: 'Helvetica Neue', Arial, sans-serif; padding: 24px; color: #212529; width: 760px;">
-                    <div style="border-bottom: 2px solid #0d6efd; padding-bottom: 8px; margin-bottom: 16px;">
-                        <h2 style="margin:0; color:#0d6efd;">${escapeHtml(title)}</h2>
-                        <div style="font-size: 12px; color: #6c757d;">Xuất lúc: ${escapeHtml(exportedAt)}</div>
-                    </div>
+            doc.autoTable({
+                startY: 41,
+                margin: { left: 10, right: 10 },
+                head: [['STT', 'Tiêu đề', 'Số tiền', 'Quy đổi (VND)', 'Người trả', 'Người hưởng', 'Ngày']],
+                body: expenseRows.map(r => [
+                    String(r.stt),
+                    r.title,
+                    formatAmountWithCurrency(r.amount, r.currency),
+                    r.amountVnd === null ? 'Thiếu tỷ giá' : formatCurrency(r.amountVnd),
+                    r.payer,
+                    r.beneficiaries,
+                    r.expenseDate ? formatExpenseDateForDisplay(r.expenseDate) : '-',
+                ]),
+                styles: {
+                    font: fontName,
+                    fontStyle: 'normal',
+                    fontSize: 8.5,
+                    cellPadding: 1.6,
+                    overflow: 'linebreak',
+                    valign: 'middle',
+                },
+                headStyles: {
+                    font: fontName,
+                    fontStyle: 'normal',
+                    fillColor: [13, 110, 253],
+                    textColor: 255,
+                    halign: 'center',
+                },
+                bodyStyles: { textColor: [33, 37, 41] },
+                alternateRowStyles: { fillColor: [248, 249, 250] },
+                columnStyles: {
+                    0: { cellWidth: 9, halign: 'center' },
+                    1: { cellWidth: 'auto' },
+                    2: { cellWidth: 22, halign: 'right' },
+                    3: { cellWidth: 26, halign: 'right' },
+                    4: { cellWidth: 22 },
+                    5: { cellWidth: 30 },
+                    6: { cellWidth: 18, halign: 'center' },
+                },
+                didParseCell: function (data) {
+                    if (data.section === 'body' && data.column.index === 3) {
+                        const raw = data.cell.raw;
+                        if (typeof raw === 'string' && raw.indexOf('Thiếu') === 0) {
+                            data.cell.styles.textColor = [220, 53, 69];
+                        }
+                    }
+                },
+                didDrawPage: function (data) {
+                    const pageCount = doc.internal.getNumberOfPages();
+                    const pageNum = doc.internal.getCurrentPageInfo().pageNumber;
+                    doc.setFont(fontName, 'normal');
+                    doc.setFontSize(8);
+                    doc.setTextColor(108, 117, 125);
+                    doc.text(`Trang ${pageNum}/${pageCount}`, 196, 290, { align: 'right' });
+                },
+            });
 
-                    <div style="margin-bottom: 12px; font-size: 13px;">
-                        <strong>Số chi phí:</strong> ${expenseRows.length}
-                        &nbsp;&nbsp;
-                        <strong>Tổng chi phí (VND):</strong> ${formatCurrency(totalVnd)}
-                        ${hasMissing ? '<span style="color:#dc3545;"> (một số khoản thiếu tỷ giá)</span>' : ''}
-                    </div>
+            // Thống kê theo ngày — đặt ngay dưới bảng chính, sang trang nếu hết chỗ
+            let cursorY = doc.lastAutoTable.finalY + 10;
+            if (cursorY > 250) {
+                doc.addPage();
+                cursorY = 20;
+            }
+            doc.setFont(fontName, 'normal');
+            doc.setFontSize(12);
+            doc.setTextColor(33, 37, 41);
+            doc.text('Thống kê theo ngày', 14, cursorY);
 
-                    <h4 style="margin: 16px 0 8px 0;">Danh sách chi phí</h4>
-                    <table style="width:100%; border-collapse: collapse; font-size: 12px;">
-                        <thead>
-                            <tr style="background:#0d6efd; color:#fff;">
-                                <th style="padding:6px; border:1px solid #dee2e6; width: 36px;">STT</th>
-                                <th style="padding:6px; border:1px solid #dee2e6; text-align:left;">Tiêu đề</th>
-                                <th style="padding:6px; border:1px solid #dee2e6;">Số tiền</th>
-                                <th style="padding:6px; border:1px solid #dee2e6;">Quy đổi (VND)</th>
-                                <th style="padding:6px; border:1px solid #dee2e6; text-align:left;">Người trả</th>
-                                <th style="padding:6px; border:1px solid #dee2e6; text-align:left;">Người hưởng</th>
-                                <th style="padding:6px; border:1px solid #dee2e6; width: 78px;">Ngày</th>
-                            </tr>
-                        </thead>
-                        <tbody>${expenseTbody}</tbody>
-                    </table>
+            doc.autoTable({
+                startY: cursorY + 3,
+                margin: { left: 10, right: 10 },
+                tableWidth: 110,
+                head: [['Ngày', 'Số chi phí', 'Tổng (VND)']],
+                body: dailyRows.map(r => [
+                    r.date === 'Chưa có ngày' ? r.date : formatExpenseDateForDisplay(r.date),
+                    String(r.count),
+                    formatCurrency(r.total) + (r.missing ? ' *' : ''),
+                ]),
+                styles: { font: fontName, fontStyle: 'normal', fontSize: 9, cellPadding: 1.6 },
+                headStyles: {
+                    font: fontName,
+                    fontStyle: 'normal',
+                    fillColor: [108, 117, 125],
+                    textColor: 255,
+                    halign: 'center',
+                },
+                columnStyles: {
+                    0: { cellWidth: 30, halign: 'center' },
+                    1: { cellWidth: 28, halign: 'center' },
+                    2: { cellWidth: 52, halign: 'right' },
+                },
+            });
 
-                    <h4 style="margin: 20px 0 8px 0;">Thống kê theo ngày</h4>
-                    <table style="width:60%; border-collapse: collapse; font-size: 12px;">
-                        <thead>
-                            <tr style="background:#f1f3f5;">
-                                <th style="padding:6px; border:1px solid #dee2e6; text-align:left;">Ngày</th>
-                                <th style="padding:6px; border:1px solid #dee2e6; width: 90px;">Số chi phí</th>
-                                <th style="padding:6px; border:1px solid #dee2e6;">Tổng (VND)</th>
-                            </tr>
-                        </thead>
-                        <tbody>${dailyTbody}</tbody>
-                    </table>
-                    ${hasMissing ? '<div style="margin-top:8px; font-size:11px; color:#6c757d;">* Có chi phí thiếu tỷ giá nên chưa được tính vào tổng.</div>' : ''}
-                </div>
-            `;
+            if (hasMissing) {
+                const noteY = doc.lastAutoTable.finalY + 5;
+                doc.setFont(fontName, 'normal');
+                doc.setFontSize(8);
+                doc.setTextColor(108, 117, 125);
+                doc.text('* Có chi phí thiếu tỷ giá nên chưa được tính vào tổng.', 14, noteY);
+            }
 
-            const wrapper = document.createElement('div');
-            wrapper.style.position = 'fixed';
-            wrapper.style.left = '-10000px';
-            wrapper.style.top = '0';
-            wrapper.innerHTML = html;
-            document.body.appendChild(wrapper);
-
-            const opt = {
-                margin: [10, 10, 10, 10],
-                filename: buildExportFilename('pdf'),
-                image: { type: 'jpeg', quality: 0.95 },
-                html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
-                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-                pagebreak: { mode: ['css', 'legacy'] },
-            };
-
-            html2pdf().set(opt).from(wrapper.firstElementChild).save()
-                .catch(err => {
-                    console.error(err);
-                    showToast('Không thể xuất PDF: ' + err.message, 'error');
-                })
-                .finally(() => {
-                    document.body.removeChild(wrapper);
-                });
+            doc.save(buildExportFilename('pdf'));
         }
 
         function renderExpenses() {
@@ -2344,18 +2422,18 @@
 
         // Xuất Excel / PDF
         $('#exportExcelBtn').click(exportExpensesToExcel);
-        $('#exportPdfBtn').click(function () {
+        $('#exportPdfBtn').click(async function () {
             const $btn = $(this);
             const original = $btn.html();
             $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Đang xuất...');
-            // Cho UI cập nhật trước khi html2canvas chạy đồng bộ
-            setTimeout(() => {
-                try {
-                    exportExpensesToPDF();
-                } finally {
-                    setTimeout(() => $btn.prop('disabled', false).html(original), 600);
-                }
-            }, 50);
+            try {
+                await exportExpensesToPDF();
+            } catch (err) {
+                console.error(err);
+                showToast('Không thể xuất PDF: ' + err.message, 'error');
+            } finally {
+                $btn.prop('disabled', false).html(original);
+            }
         });
 
         // Xử lý nút sắp xếp danh sách chi phí
