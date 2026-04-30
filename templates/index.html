@@ -375,6 +375,12 @@
                                     <i class="fas fa-sort-down me-1"></i>
                                     <span id="sortText">Mới nhất</span>
                                 </button>
+                                <button type="button" class="btn btn-sm btn-outline-success" id="exportExcelBtn" title="Xuất Excel">
+                                    <i class="fas fa-file-excel me-1"></i>Excel
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" id="exportPdfBtn" title="Xuất PDF">
+                                    <i class="fas fa-file-pdf me-1"></i>PDF
+                                </button>
                             </div>
                         </div>
                         <div id="expensesSummary" class="small text-muted mb-2 d-none">
@@ -705,6 +711,8 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script>
     $(document).ready(function () {
         let currentEventCode = localStorage.getItem('currentEventCode') || null;
@@ -1475,6 +1483,230 @@
             });
         }
 
+        function buildExportFilename(ext) {
+            const title = ($('#eventTitle').text() || 'chi-phi').trim();
+            const safe = title
+                .normalize('NFD').replace(/[̀-ͯ]/g, '')
+                .replace(/đ/g, 'd').replace(/Đ/g, 'D')
+                .replace(/[^a-zA-Z0-9-_]+/g, '-')
+                .replace(/^-+|-+$/g, '')
+                .toLowerCase() || 'chi-phi';
+            return `${safe}-${todayISODate()}.${ext}`;
+        }
+
+        function buildExpenseExportRows() {
+            const sorted = sortExpenses();
+            return sorted.map((e, displayIndex) => {
+                const stt = sortOrder === 'newest' ? sorted.length - displayIndex : displayIndex + 1;
+                const cur = getCurrencyOfExpense(e);
+                const vnd = amountInVND(e);
+                let beneficiaries;
+                if (e.benefitType === 'all') {
+                    beneficiaries = 'Tất cả';
+                } else if (e.beneficiaries && e.beneficiaries.length) {
+                    beneficiaries = e.beneficiaries.join(', ');
+                } else {
+                    beneficiaries = '';
+                }
+                return {
+                    stt,
+                    title: e.title || '',
+                    amount: Number(e.amount) || 0,
+                    currency: cur || 'VND',
+                    amountVnd: vnd === null ? null : Math.round(vnd),
+                    payer: e.payer || '',
+                    beneficiaries,
+                    expenseDate: e.expense_date || '',
+                    createdTime: e.created_time || '',
+                    updatedTime: e.updated_time || '',
+                };
+            });
+        }
+
+        function buildDailyStatsExportRows() {
+            const groups = {};
+            expenses.forEach(e => {
+                const key = e.expense_date || '';
+                if (!groups[key]) groups[key] = { count: 0, total: 0, missing: false };
+                groups[key].count += 1;
+                const v = amountInVND(e);
+                if (v === null) groups[key].missing = true;
+                else groups[key].total += v;
+            });
+            return Object.keys(groups)
+                .sort((a, b) => {
+                    if (!a) return 1;
+                    if (!b) return -1;
+                    return a.localeCompare(b);
+                })
+                .map(k => ({
+                    date: k || 'Chưa có ngày',
+                    count: groups[k].count,
+                    total: Math.round(groups[k].total),
+                    missing: groups[k].missing,
+                }));
+        }
+
+        function exportExpensesToExcel() {
+            if (!expenses.length) {
+                showToast('Chưa có chi phí để xuất.', 'warning');
+                return;
+            }
+            if (typeof XLSX === 'undefined') {
+                showToast('Thư viện xuất Excel chưa tải xong, vui lòng thử lại.', 'error');
+                return;
+            }
+
+            const expenseRows = buildExpenseExportRows();
+            const sheet1 = [[
+                'STT', 'Tiêu đề', 'Số tiền', 'Tiền tệ', 'Quy đổi (VND)',
+                'Người trả', 'Người hưởng', 'Ngày phát sinh', 'Tạo lúc', 'Cập nhật lúc'
+            ]];
+            expenseRows.forEach(r => {
+                sheet1.push([
+                    r.stt, r.title, r.amount, r.currency,
+                    r.amountVnd === null ? 'Thiếu tỷ giá' : r.amountVnd,
+                    r.payer, r.beneficiaries, r.expenseDate, r.createdTime, r.updatedTime,
+                ]);
+            });
+            const totalVnd = expenseRows.reduce((s, r) => s + (r.amountVnd || 0), 0);
+            sheet1.push([]);
+            sheet1.push(['', 'Tổng chi phí (VND)', '', '', totalVnd]);
+
+            const ws1 = XLSX.utils.aoa_to_sheet(sheet1);
+            ws1['!cols'] = [
+                { wch: 5 }, { wch: 32 }, { wch: 12 }, { wch: 8 }, { wch: 16 },
+                { wch: 16 }, { wch: 28 }, { wch: 14 }, { wch: 20 }, { wch: 20 }
+            ];
+
+            const dailyRows = buildDailyStatsExportRows();
+            const sheet2 = [['Ngày phát sinh', 'Số chi phí', 'Tổng (VND)', 'Ghi chú']];
+            dailyRows.forEach(r => {
+                sheet2.push([r.date, r.count, r.total, r.missing ? 'Thiếu tỷ giá' : '']);
+            });
+            const ws2 = XLSX.utils.aoa_to_sheet(sheet2);
+            ws2['!cols'] = [{ wch: 16 }, { wch: 12 }, { wch: 16 }, { wch: 16 }];
+
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws1, 'Chi phí');
+            XLSX.utils.book_append_sheet(wb, ws2, 'Theo ngày');
+            XLSX.writeFile(wb, buildExportFilename('xlsx'));
+        }
+
+        function exportExpensesToPDF() {
+            if (!expenses.length) {
+                showToast('Chưa có chi phí để xuất.', 'warning');
+                return;
+            }
+            if (typeof html2pdf === 'undefined') {
+                showToast('Thư viện xuất PDF chưa tải xong, vui lòng thử lại.', 'error');
+                return;
+            }
+
+            const expenseRows = buildExpenseExportRows();
+            const dailyRows = buildDailyStatsExportRows();
+            const totalVnd = expenseRows.reduce((s, r) => s + (r.amountVnd || 0), 0);
+            const hasMissing = expenseRows.some(r => r.amountVnd === null);
+            const title = ($('#eventTitle').text() || 'Chi phí').trim();
+            const exportedAt = new Date().toLocaleString('vi-VN');
+
+            const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[c]));
+
+            const expenseTbody = expenseRows.map(r => {
+                const amountStr = `${formatAmountWithCurrency(r.amount, r.currency)}`;
+                const vndStr = r.amountVnd === null
+                    ? '<span style="color:#dc3545;">Thiếu tỷ giá</span>'
+                    : formatCurrency(r.amountVnd);
+                return `<tr>
+                    <td style="text-align:center;">${r.stt}</td>
+                    <td>${escapeHtml(r.title)}</td>
+                    <td style="text-align:right;">${escapeHtml(amountStr)}</td>
+                    <td style="text-align:right;">${vndStr}</td>
+                    <td>${escapeHtml(r.payer)}</td>
+                    <td>${escapeHtml(r.beneficiaries)}</td>
+                    <td style="text-align:center;">${escapeHtml(r.expenseDate ? formatExpenseDateForDisplay(r.expenseDate) : '-')}</td>
+                </tr>`;
+            }).join('');
+
+            const dailyTbody = dailyRows.map(r => `<tr>
+                <td>${escapeHtml(r.date === 'Chưa có ngày' ? r.date : formatExpenseDateForDisplay(r.date))}</td>
+                <td style="text-align:center;">${r.count}</td>
+                <td style="text-align:right;">${formatCurrency(r.total)}${r.missing ? ' <span style="color:#dc3545;">*</span>' : ''}</td>
+            </tr>`).join('');
+
+            const html = `
+                <div style="font-family: 'Helvetica Neue', Arial, sans-serif; padding: 24px; color: #212529; width: 760px;">
+                    <div style="border-bottom: 2px solid #0d6efd; padding-bottom: 8px; margin-bottom: 16px;">
+                        <h2 style="margin:0; color:#0d6efd;">${escapeHtml(title)}</h2>
+                        <div style="font-size: 12px; color: #6c757d;">Xuất lúc: ${escapeHtml(exportedAt)}</div>
+                    </div>
+
+                    <div style="margin-bottom: 12px; font-size: 13px;">
+                        <strong>Số chi phí:</strong> ${expenseRows.length}
+                        &nbsp;&nbsp;
+                        <strong>Tổng chi phí (VND):</strong> ${formatCurrency(totalVnd)}
+                        ${hasMissing ? '<span style="color:#dc3545;"> (một số khoản thiếu tỷ giá)</span>' : ''}
+                    </div>
+
+                    <h4 style="margin: 16px 0 8px 0;">Danh sách chi phí</h4>
+                    <table style="width:100%; border-collapse: collapse; font-size: 12px;">
+                        <thead>
+                            <tr style="background:#0d6efd; color:#fff;">
+                                <th style="padding:6px; border:1px solid #dee2e6; width: 36px;">STT</th>
+                                <th style="padding:6px; border:1px solid #dee2e6; text-align:left;">Tiêu đề</th>
+                                <th style="padding:6px; border:1px solid #dee2e6;">Số tiền</th>
+                                <th style="padding:6px; border:1px solid #dee2e6;">Quy đổi (VND)</th>
+                                <th style="padding:6px; border:1px solid #dee2e6; text-align:left;">Người trả</th>
+                                <th style="padding:6px; border:1px solid #dee2e6; text-align:left;">Người hưởng</th>
+                                <th style="padding:6px; border:1px solid #dee2e6; width: 78px;">Ngày</th>
+                            </tr>
+                        </thead>
+                        <tbody>${expenseTbody}</tbody>
+                    </table>
+
+                    <h4 style="margin: 20px 0 8px 0;">Thống kê theo ngày</h4>
+                    <table style="width:60%; border-collapse: collapse; font-size: 12px;">
+                        <thead>
+                            <tr style="background:#f1f3f5;">
+                                <th style="padding:6px; border:1px solid #dee2e6; text-align:left;">Ngày</th>
+                                <th style="padding:6px; border:1px solid #dee2e6; width: 90px;">Số chi phí</th>
+                                <th style="padding:6px; border:1px solid #dee2e6;">Tổng (VND)</th>
+                            </tr>
+                        </thead>
+                        <tbody>${dailyTbody}</tbody>
+                    </table>
+                    ${hasMissing ? '<div style="margin-top:8px; font-size:11px; color:#6c757d;">* Có chi phí thiếu tỷ giá nên chưa được tính vào tổng.</div>' : ''}
+                </div>
+            `;
+
+            const wrapper = document.createElement('div');
+            wrapper.style.position = 'fixed';
+            wrapper.style.left = '-10000px';
+            wrapper.style.top = '0';
+            wrapper.innerHTML = html;
+            document.body.appendChild(wrapper);
+
+            const opt = {
+                margin: [10, 10, 10, 10],
+                filename: buildExportFilename('pdf'),
+                image: { type: 'jpeg', quality: 0.95 },
+                html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+                pagebreak: { mode: ['css', 'legacy'] },
+            };
+
+            html2pdf().set(opt).from(wrapper.firstElementChild).save()
+                .catch(err => {
+                    console.error(err);
+                    showToast('Không thể xuất PDF: ' + err.message, 'error');
+                })
+                .finally(() => {
+                    document.body.removeChild(wrapper);
+                });
+        }
+
         function renderExpenses() {
             $('#expensesList').empty();
 
@@ -2108,6 +2340,22 @@
         // Resize biểu đồ thống kê khi mở collapse (canvas cần kích thước thật)
         $('#dailyStatsBody').on('shown.bs.collapse', function () {
             if (dailyStatsChartInstance) dailyStatsChartInstance.resize();
+        });
+
+        // Xuất Excel / PDF
+        $('#exportExcelBtn').click(exportExpensesToExcel);
+        $('#exportPdfBtn').click(function () {
+            const $btn = $(this);
+            const original = $btn.html();
+            $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Đang xuất...');
+            // Cho UI cập nhật trước khi html2canvas chạy đồng bộ
+            setTimeout(() => {
+                try {
+                    exportExpensesToPDF();
+                } finally {
+                    setTimeout(() => $btn.prop('disabled', false).html(original), 600);
+                }
+            }, 50);
         });
 
         // Xử lý nút sắp xếp danh sách chi phí
