@@ -331,41 +331,6 @@ def get_banks():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/api/events', methods=['GET'])
-def get_all_events():
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            '''
-            SELECT id, event_code, title, members, expenses, created_at, updated_at
-            FROM events
-            ORDER BY updated_at DESC
-            '''
-        )
-        events = cursor.fetchall()
-        cursor.close()
-
-        events_list = []
-        for event in events:
-            members = json.loads(event['members'])
-            expenses = json.loads(event['expenses'])
-            total_expense = sum(expense.get('amount', 0) for expense in expenses)
-            events_list.append({
-                'id': event['id'],
-                'event_code': event['event_code'],
-                'title': event['title'],
-                'members_count': len(members),
-                'expenses_count': len(expenses),
-                'total_expense': total_expense,
-                'created_at': event['created_at'].isoformat() if event['created_at'] else None,
-                'updated_at': event['updated_at'].isoformat() if event['updated_at'] else None,
-            })
-        return jsonify({'success': True, 'events': events_list})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
 @app.route('/api/events/<event_code>', methods=['DELETE'])
 def delete_event(event_code):
     try:

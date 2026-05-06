@@ -118,24 +118,6 @@ def test_update_event(event_code):
         print(f"❌ Update event failed - Status: {response.status_code}")
         return False
 
-def test_get_all_events():
-    """Test lấy danh sách tất cả sự kiện"""
-    print("Testing get all events API...")
-    response = requests.get(f"{BASE_URL}/api/events")
-    
-    if response.status_code == 200:
-        data = response.json()
-        if data.get('success'):
-            events = data.get('events', [])
-            print(f"✅ Get all events OK - Found {len(events)} events")
-            return len(events) > 0
-        else:
-            print(f"❌ Get all events failed - {data.get('error')}")
-            return False
-    else:
-        print(f"❌ Get all events failed - Status: {response.status_code}")
-        return False
-
 def test_delete_event(event_code):
     """Test xóa sự kiện"""
     print(f"Testing delete event API for {event_code}...")
@@ -173,11 +155,7 @@ def main():
     # Test update event
     if not test_update_event(event_code):
         return
-    
-    # Test get all events
-    if not test_get_all_events():
-        return
-    
+
     # Test delete event
     if not test_delete_event(event_code):
         return

@@ -59,7 +59,6 @@ chia-tien-nhom-flask/
 
 ### Events
 - `POST /api/events` - Tạo sự kiện mới
-- `GET /api/events` - Lấy danh sách tất cả sự kiện
 - `GET /api/events/<event_code>` - Lấy thông tin sự kiện
 - `PUT /api/events/<event_code>` - Cập nhật sự kiện
 - `DELETE /api/events/<event_code>` - Xóa sự kiện

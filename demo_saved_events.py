@@ -131,34 +131,6 @@ def create_multiple_events():
     
     return created_events
 
-def test_get_all_events():
-    """Test lấy danh sách tất cả sự kiện"""
-    print(f"\n📋 Lấy danh sách tất cả sự kiện...")
-    
-    response = requests.get(f"{BASE_URL}/api/events")
-    
-    if response.status_code == 200:
-        data = response.json()
-        if data.get('success'):
-            events = data.get('events', [])
-            print(f"✅ Tìm thấy {len(events)} sự kiện:")
-            
-            for i, event in enumerate(events, 1):
-                print(f"   {i}. {event['title']}")
-                print(f"      👥 {event['members_count']} thành viên")
-                print(f"      💰 {event['expenses_count']} chi phí - Tổng: {event['total_expense']:,} VND")
-                print(f"      📅 {event['updated_at']}")
-                print(f"      🔑 Mã: {event['event_code']}")
-                print()
-            
-            return events
-        else:
-            print(f"❌ Lỗi: {data.get('error')}")
-            return []
-    else:
-        print(f"❌ Lỗi HTTP: {response.status_code}")
-        return []
-
 def test_delete_event(event_code):
     """Test xóa một sự kiện"""
     print(f"🗑️  Xóa sự kiện {event_code}...")
@@ -188,24 +160,12 @@ def main():
         return
     
     print(f"\n✅ Đã tạo {len(created_events)} sự kiện demo!")
-    
-    # Test lấy danh sách sự kiện
-    events = test_get_all_events()
-    if not events:
-        print("❌ Không thể lấy danh sách sự kiện!")
-        return
-    
-    # Test xóa một sự kiện
-    if events:
-        first_event = events[0]
-        if test_delete_event(first_event['event_code']):
-            print(f"✅ Đã xóa sự kiện: {first_event['title']}")
-            
-            # Kiểm tra lại danh sách sau khi xóa
-            print(f"\n📋 Kiểm tra danh sách sau khi xóa...")
-            remaining_events = test_get_all_events()
-            print(f"✅ Còn lại {len(remaining_events)} sự kiện")
-    
+
+    # Test xóa sự kiện đầu tiên
+    first_event = created_events[0]
+    if test_delete_event(first_event['event_code']):
+        print(f"✅ Đã xóa sự kiện: {first_event['title']}")
+
     print(f"\n🎯 Demo hoàn thành!")
     print(f"📱 Bạn có thể mở ứng dụng để xem danh sách sự kiện:")
     print(f"   {BASE_URL}")
