@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask_limiter import Limiter
 import psycopg2
 import psycopg2.extras
 import os
@@ -17,6 +18,31 @@ app = Flask(
     template_folder=os.path.join(BASE_DIR, 'templates'),
     static_folder=os.path.join(BASE_DIR, 'static'),
 )
+
+
+def _client_ip():
+    fwd = request.headers.get('x-forwarded-for', '')
+    if fwd:
+        return fwd.split(',')[0].strip()
+    return request.remote_addr or '127.0.0.1'
+
+
+limiter = Limiter(
+    key_func=_client_ip,
+    app=app,
+    default_limits=['200 per minute', '2000 per day'],
+    storage_uri='memory://',
+    headers_enabled=True,
+)
+
+
+@app.errorhandler(429)
+def _ratelimit_handler(e):
+    return jsonify({
+        'success': False,
+        'error': 'Quá nhiều yêu cầu, vui lòng thử lại sau.',
+        'detail': str(e.description),
+    }), 429
 
 
 def _database_url():
@@ -77,6 +103,7 @@ def manifest():
 
 
 @app.route('/api/events', methods=['POST'])
+@limiter.limit('10 per minute; 100 per day')
 def create_event():
     try:
         data = request.get_json()
@@ -109,6 +136,7 @@ def create_event():
 
 
 @app.route('/api/events/<event_code>', methods=['GET'])
+@limiter.limit('120 per minute')
 def get_event(event_code):
     try:
         conn = get_db_connection()
@@ -141,6 +169,7 @@ def get_event(event_code):
 
 
 @app.route('/api/events/<event_code>', methods=['PUT'])
+@limiter.limit('60 per minute; 1000 per day')
 def update_event(event_code):
     try:
         data = request.get_json()
@@ -285,6 +314,7 @@ def _fetch_erapi_rates(_date_str):
 
 
 @app.route('/api/exchange-rates')
+@limiter.limit('30 per minute; 500 per day')
 def get_exchange_rates():
     date_str = request.args.get('date') or datetime.now().strftime('%Y-%m-%d')
     rate_type = (request.args.get('type') or 'mid').lower()
@@ -321,6 +351,7 @@ def get_exchange_rates():
 
 
 @app.route('/api/banks')
+@limiter.exempt
 def get_banks():
     try:
         banks_path = os.path.join(BASE_DIR, 'static', 'banks.json')
@@ -332,6 +363,7 @@ def get_banks():
 
 
 @app.route('/api/events/<event_code>', methods=['DELETE'])
+@limiter.limit('10 per minute; 50 per day')
 def delete_event(event_code):
     try:
         conn = get_db_connection()

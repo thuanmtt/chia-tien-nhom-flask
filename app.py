@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, jsonify, redirect, url_for, send_from_directory
+from flask_limiter import Limiter
 import sqlite3
 import os
 import json
@@ -10,6 +11,32 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
 app = Flask(__name__)
+
+
+def _client_ip():
+    fwd = request.headers.get('x-forwarded-for', '')
+    if fwd:
+        return fwd.split(',')[0].strip()
+    return request.remote_addr or '127.0.0.1'
+
+
+limiter = Limiter(
+    key_func=_client_ip,
+    app=app,
+    default_limits=['200 per minute', '2000 per day'],
+    storage_uri='memory://',
+    headers_enabled=True,
+)
+
+
+@app.errorhandler(429)
+def _ratelimit_handler(e):
+    return jsonify({
+        'success': False,
+        'error': 'Quá nhiều yêu cầu, vui lòng thử lại sau.',
+        'detail': str(e.description),
+    }), 429
+
 
 # Cấu hình database
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -81,6 +108,7 @@ def manifest():
     return send_from_directory(app.static_folder, 'manifest.json', mimetype='application/manifest+json')
 
 @app.route('/api/events', methods=['POST'])
+@limiter.limit('10 per minute; 100 per day')
 def create_event():
     """Tạo sự kiện mới"""
     try:
@@ -122,6 +150,7 @@ def create_event():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/events/<event_code>', methods=['GET'])
+@limiter.limit('120 per minute')
 def get_event(event_code):
     """Lấy thông tin sự kiện theo event_code"""
     try:
@@ -159,6 +188,7 @@ def get_event(event_code):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/events/<event_code>', methods=['PUT'])
+@limiter.limit('60 per minute; 1000 per day')
 def update_event(event_code):
     """Cập nhật sự kiện"""
     try:
@@ -314,6 +344,7 @@ def _fetch_erapi_rates(_date_str):
 
 
 @app.route('/api/exchange-rates')
+@limiter.limit('30 per minute; 500 per day')
 def get_exchange_rates():
     """Lấy tỷ giá. type=mid dùng fallback chain fawaz→erapi→vcb-mid; còn lại dùng Vietcombank."""
     date_str = request.args.get('date') or datetime.now().strftime('%Y-%m-%d')
@@ -351,6 +382,7 @@ def get_exchange_rates():
 
 
 @app.route('/api/banks')
+@limiter.exempt
 def get_banks():
     """Lấy danh sách ngân hàng"""
     try:
@@ -362,6 +394,7 @@ def get_banks():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/events/<event_code>', methods=['DELETE'])
+@limiter.limit('10 per minute; 50 per day')
 def delete_event(event_code):
     """Xóa sự kiện"""
     try:
