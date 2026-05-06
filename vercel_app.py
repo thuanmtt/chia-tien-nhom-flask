@@ -30,9 +30,25 @@ def _database_url():
     return url
 
 
+_conn = None
+
+
 def get_db_connection():
-    conn = psycopg2.connect(_database_url())
-    return conn
+    global _conn
+    if _conn is not None and not _conn.closed:
+        try:
+            with _conn.cursor() as c:
+                c.execute('SELECT 1')
+            return _conn
+        except psycopg2.Error:
+            try:
+                _conn.close()
+            except Exception:
+                pass
+            _conn = None
+    _conn = psycopg2.connect(_database_url(), connect_timeout=5)
+    _conn.autocommit = True
+    return _conn
 
 
 def generate_event_code():
@@ -85,8 +101,7 @@ def create_event():
                 json.dumps(data.get('rates', {})),
             ),
         )
-        conn.commit()
-        conn.close()
+        cursor.close()
 
         return jsonify({'success': True, 'event_id': event_id, 'event_code': event_code})
     except Exception as e:
@@ -100,7 +115,7 @@ def get_event(event_code):
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute('SELECT * FROM events WHERE event_code = %s', (event_code,))
         event = cursor.fetchone()
-        conn.close()
+        cursor.close()
 
         if event:
             couples_raw = event.get('couples') if isinstance(event, dict) else None
@@ -148,10 +163,9 @@ def update_event(event_code):
             ),
         )
         if cursor.rowcount == 0:
-            conn.close()
+            cursor.close()
             return jsonify({'success': False, 'error': 'Event not found'}), 404
-        conn.commit()
-        conn.close()
+        cursor.close()
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -330,7 +344,7 @@ def get_all_events():
             '''
         )
         events = cursor.fetchall()
-        conn.close()
+        cursor.close()
 
         events_list = []
         for event in events:
@@ -359,10 +373,9 @@ def delete_event(event_code):
         cursor = conn.cursor()
         cursor.execute('DELETE FROM events WHERE event_code = %s', (event_code,))
         if cursor.rowcount == 0:
-            conn.close()
+            cursor.close()
             return jsonify({'success': False, 'error': 'Event not found'}), 404
-        conn.commit()
-        conn.close()
+        cursor.close()
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
