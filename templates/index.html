@@ -1966,22 +1966,52 @@
             });
         }
 
+        // Tính tổng chi phí của một sự kiện (quy đổi về VND theo rates riêng của sự kiện)
+        function computeSavedEventTotal(event) {
+            if (!event || !event.expenses || event.expenses.length === 0) {
+                return { total: 0, missingRates: [] };
+            }
+            const eventRates = event.rates || {};
+            const missingRates = new Set();
+            let total = 0;
+            event.expenses.forEach(exp => {
+                const amt = parseFloat(exp.amount) || 0;
+                const cur = (exp && exp.currency) ? exp.currency : 'VND';
+                if (cur === 'VND') {
+                    total += amt;
+                    return;
+                }
+                const entry = eventRates[cur];
+                const rate = (entry && typeof entry.rate === 'number' && entry.rate > 0) ? entry.rate : null;
+                if (rate === null) {
+                    missingRates.add(cur);
+                    return;
+                }
+                total += amt * rate;
+            });
+            return { total, missingRates: Array.from(missingRates) };
+        }
+
         // Hàm hiển thị danh sách sự kiện
         function displaySavedEvents(events) {
             $('#savedEventsList').empty();
-            
+
             if (events.length === 0) {
                 $('#savedEventsList').append('<p class="text-center text-muted">Chưa có sự kiện nào được lưu trên máy này.</p>');
                 return;
             }
-            
+
             // Sắp xếp theo thời gian cập nhật mới nhất
             events.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
-            
+
             events.forEach(function(event) {
                 const date = new Date(event.updated_at).toLocaleDateString('vi-VN');
                 const time = new Date(event.updated_at).toLocaleTimeString('vi-VN', {hour: '2-digit', minute: '2-digit'});
-                
+                const { total, missingRates } = computeSavedEventTotal(event);
+                const totalLabel = missingRates.length > 0
+                    ? `${formatCurrency(total)} <span class="text-danger small">(thiếu tỷ giá: ${missingRates.join(', ')})</span>`
+                    : formatCurrency(total);
+
                 $('#savedEventsList').append(`
                     <div class="list-group-item list-group-item-action event-item" data-event-code="${event.event_code}">
                         <div class="d-flex w-100 justify-content-between">
@@ -1992,7 +2022,7 @@
                             <div>
                                 <p class="mb-1">Số thành viên: ${event.members ? event.members.length : 0}</p>
                                 <p class="mb-1">Số chi phí: ${event.expenses ? event.expenses.length : 0}</p>
-                                <p class="mb-1">Tổng chi phí: ${formatCurrency(event.expenses ? event.expenses.reduce((sum, exp) => sum + parseFloat(exp.amount), 0) : 0)}</p>
+                                <p class="mb-1">Tổng chi phí: ${totalLabel}</p>
                                 <small class="text-muted">Mã: ${event.event_code}</small>
                             </div>
                             <div>
