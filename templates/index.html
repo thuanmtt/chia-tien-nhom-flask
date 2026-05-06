@@ -2366,6 +2366,7 @@
                 updated_time: nowIso
             };
 
+            const isAdding = editingExpenseIndex === null;
             if (editingExpenseIndex !== null && expenses[editingExpenseIndex]) {
                 // Cập nhật tại chỗ, giữ created_time gốc
                 expenseData.created_time = expenses[editingExpenseIndex].created_time || createdTime;
@@ -2379,6 +2380,11 @@
 
             // Tự động lưu sau khi thêm/cập nhật chi phí
             saveEvent(false);
+
+            // Focus lại ô Mục chi tiêu để nhập tiếp khi vừa thêm mới
+            if (isAdding) {
+                $('#expenseTitle').trigger('focus');
+            }
         });
 
         // Xử lý xóa chi phí
