@@ -368,9 +368,13 @@
                         </form>
                     </div>
                     <div class="expenses-list mt-4">
-                        <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
                             <h6 class="mb-0">Danh sách chi phí</h6>
                             <div class="btn-group" role="group">
+                                <button type="button" class="btn btn-sm btn-outline-primary" id="toggleFiltersBtn" data-bs-toggle="collapse" data-bs-target="#expenseFiltersBody" aria-expanded="false" aria-controls="expenseFiltersBody" title="Lọc danh sách">
+                                    <i class="fas fa-filter me-1"></i>Lọc
+                                    <span class="badge bg-primary ms-1 d-none" id="activeFilterCount">0</span>
+                                </button>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" id="sortExpensesBtn" title="Sắp xếp danh sách">
                                     <i class="fas fa-sort-down me-1"></i>
                                     <span id="sortText">Mới nhất</span>
@@ -381,6 +385,51 @@
                                 <button type="button" class="btn btn-sm btn-outline-danger" id="exportPdfBtn" title="Xuất PDF">
                                     <i class="fas fa-file-pdf me-1"></i>PDF
                                 </button>
+                            </div>
+                        </div>
+                        <div class="collapse mb-2" id="expenseFiltersBody">
+                            <div class="card card-body bg-light p-2">
+                                <div class="row g-2">
+                                    <div class="col-12">
+                                        <div class="input-group input-group-sm">
+                                            <span class="input-group-text"><i class="fas fa-search"></i></span>
+                                            <input type="search" id="filterSearch" class="form-control form-control-sm" placeholder="Tìm theo tiêu đề (gõ không dấu cũng được)…">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small mb-1">Người trả</label>
+                                        <select id="filterPayer" class="form-select form-select-sm">
+                                            <option value="">— Tất cả —</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small mb-1">Người hưởng</label>
+                                        <select id="filterBeneficiary" class="form-select form-select-sm">
+                                            <option value="">— Tất cả —</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-12">
+                                        <label class="form-label small mb-1">Lọc theo loại ngày</label>
+                                        <select id="filterDateField" class="form-select form-select-sm">
+                                            <option value="expense_date" selected>Ngày phát sinh</option>
+                                            <option value="created_time">Ngày tạo</option>
+                                            <option value="updated_time">Ngày cập nhật</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small mb-1">Từ ngày</label>
+                                        <input type="date" id="filterDateFrom" class="form-control form-control-sm">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small mb-1">Đến ngày</label>
+                                        <input type="date" id="filterDateTo" class="form-control form-control-sm">
+                                    </div>
+                                    <div class="col-12 d-flex justify-content-end">
+                                        <button type="button" id="clearFiltersBtn" class="btn btn-sm btn-outline-secondary">
+                                            <i class="fas fa-times me-1"></i>Xoá bộ lọc
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <div id="expensesSummary" class="small text-muted mb-2 d-none">
@@ -1367,6 +1416,9 @@
                 $('#expensePayer').append(`<option value="${member}">${member}</option>`);
             });
 
+            // Đồng bộ tuỳ chọn người trả / người hưởng trong bộ lọc chi phí
+            rebuildFilterMemberOptions();
+
             // Tự động tính toán khi danh sách thành viên thay đổi
             autoCalculate();
         }
@@ -1382,13 +1434,97 @@
             }
         }
 
+        // Chuẩn hoá Tiếng Việt → không dấu, để search "do an" khớp "đồ ăn"
+        function normalizeViet(str) {
+            return (str == null ? '' : String(str))
+                .normalize('NFD')
+                .replace(/[̀-ͯ]/g, '')
+                .replace(/đ/g, 'd').replace(/Đ/g, 'D')
+                .toLowerCase()
+                .trim();
+        }
+
+        // Chuẩn hoá ngày của expense về dạng YYYY-MM-DD theo trường được chọn
+        function getExpenseDateKey(exp, field) {
+            const raw = exp && exp[field];
+            if (!raw) return null;
+            const s = String(raw);
+            return s.length >= 10 ? s.slice(0, 10) : s;
+        }
+
+        // Áp các bộ lọc lên một danh sách expense
+        function filterExpenses(list) {
+            const q = normalizeViet($('#filterSearch').val());
+            const payer = $('#filterPayer').val() || '';
+            const benef = $('#filterBeneficiary').val() || '';
+            const dateField = $('#filterDateField').val() || 'expense_date';
+            const fromStr = $('#filterDateFrom').val() || '';
+            const toStr = $('#filterDateTo').val() || '';
+
+            return list.filter(exp => {
+                if (q && !normalizeViet(exp.title).includes(q)) return false;
+                if (payer && exp.payer !== payer) return false;
+                if (benef) {
+                    const isAll = exp.benefitType === 'all';
+                    const inList = (exp.beneficiaries || []).includes(benef);
+                    if (!isAll && !inList) return false;
+                }
+                if (fromStr || toStr) {
+                    const dateStr = getExpenseDateKey(exp, dateField);
+                    if (!dateStr) return false;
+                    if (fromStr && dateStr < fromStr) return false;
+                    if (toStr && dateStr > toStr) return false;
+                }
+                return true;
+            });
+        }
+
+        function countActiveFilters() {
+            let n = 0;
+            if (($('#filterSearch').val() || '').trim()) n++;
+            if ($('#filterPayer').val()) n++;
+            if ($('#filterBeneficiary').val()) n++;
+            if ($('#filterDateFrom').val() || $('#filterDateTo').val()) n++;
+            return n;
+        }
+
+        function updateActiveFilterBadge() {
+            const n = countActiveFilters();
+            const $b = $('#activeFilterCount');
+            if (n > 0) $b.text(n).removeClass('d-none');
+            else $b.addClass('d-none');
+        }
+
+        // Đổ lại danh sách thành viên vào select Người trả / Người hưởng
+        function rebuildFilterMemberOptions() {
+            const $payer = $('#filterPayer');
+            const $benef = $('#filterBeneficiary');
+            if (!$payer.length || !$benef.length) return;
+
+            const prevPayer = $payer.val();
+            const prevBenef = $benef.val();
+
+            $payer.find('option:not(:first)').remove();
+            $benef.find('option:not(:first)').remove();
+
+            members.forEach(m => {
+                const opt = $('<option>').val(m).text(m);
+                $payer.append(opt.clone());
+                $benef.append(opt);
+            });
+
+            if (prevPayer && members.includes(prevPayer)) $payer.val(prevPayer);
+            if (prevBenef && members.includes(prevBenef)) $benef.val(prevBenef);
+        }
+
         // Hàm hiển thị danh sách chi phí
         let dailyStatsChartInstance = null;
 
-        function renderDailyStats() {
+        function renderDailyStats(sourceList) {
             const $container = $('#dailyStatsContainer');
+            const list = Array.isArray(sourceList) ? sourceList : expenses;
 
-            if (!expenses.length) {
+            if (!list.length) {
                 $container.addClass('d-none');
                 if (dailyStatsChartInstance) {
                     dailyStatsChartInstance.destroy();
@@ -1399,7 +1535,7 @@
 
             const groups = {};
             let anyMissing = false;
-            expenses.forEach(e => {
+            list.forEach(e => {
                 const key = e.expense_date || '__no_date__';
                 if (!groups[key]) groups[key] = { count: 0, total: 0 };
                 groups[key].count += 1;
@@ -1787,6 +1923,8 @@
 
         function renderExpenses() {
             $('#expensesList').empty();
+            rebuildFilterMemberOptions();
+            updateActiveFilterBadge();
 
             if (expenses.length === 0) {
                 $('#expensesSummary').addClass('d-none');
@@ -1796,10 +1934,17 @@
                 return;
             }
 
-            // Tính tổng chi phí (quy đổi về VND)
+            // Sắp xếp danh sách chi phí theo thứ tự hiện tại
+            const sortedExpenses = sortExpenses();
+            // Áp các bộ lọc
+            const filtered = filterExpenses(sortedExpenses);
+            const filteredSet = new Set(filtered);
+            const isFiltering = countActiveFilters() > 0;
+
+            // Tính tổng chi phí (quy đổi về VND) — theo danh sách đã lọc
             let totalVND = 0;
             let hasMissingRate = false;
-            expenses.forEach(e => {
+            filtered.forEach(e => {
                 const vnd = amountInVND(e);
                 if (vnd === null) {
                     hasMissingRate = true;
@@ -1807,16 +1952,24 @@
                     totalVND += vnd;
                 }
             });
-            $('#expensesCount').text(expenses.length);
+            const countText = isFiltering
+                ? `${filtered.length} <span class="text-muted">/ ${expenses.length}</span>`
+                : String(expenses.length);
+            $('#expensesCount').html(countText);
             const totalText = formatCurrency(totalVND) + (hasMissingRate ? ' <span class="text-danger">(thiếu tỷ giá)</span>' : '');
             $('#expensesTotal').html(totalText);
             $('#expensesSummary').removeClass('d-none');
-            renderDailyStats();
+            renderDailyStats(filtered);
 
-            // Sắp xếp danh sách chi phí theo thứ tự hiện tại
-            const sortedExpenses = sortExpenses();
+            if (filtered.length === 0) {
+                $('#expensesList').append('<p class="text-muted">Không có chi phí nào khớp với bộ lọc.</p>');
+                autoCalculate();
+                return;
+            }
 
             sortedExpenses.forEach(function (expense, displayIndex) {
+                // Bỏ qua nếu không khớp bộ lọc, nhưng STT vẫn theo full sortedExpenses
+                if (!filteredSet.has(expense)) return;
                 // Tìm index gốc trong mảng expenses
                 const index = expenses.indexOf(expense);
                 // Số thứ tự: cũ→mới hiển thị 1..n, mới→cũ hiển thị n..1
@@ -2485,6 +2638,25 @@
             $('#sortExpensesBtn i').removeClass('fa-sort fa-sort-up fa-sort-down').addClass(icon);
             
             // Render lại danh sách chi phí
+            renderExpenses();
+        });
+
+        // ======= Bộ lọc danh sách chi phí =======
+        let _filterSearchTimer = null;
+        $('#filterSearch').on('input', function () {
+            clearTimeout(_filterSearchTimer);
+            _filterSearchTimer = setTimeout(renderExpenses, 150);
+        });
+        $('#filterPayer, #filterBeneficiary, #filterDateField, #filterDateFrom, #filterDateTo').on('change', function () {
+            renderExpenses();
+        });
+        $('#clearFiltersBtn').click(function () {
+            $('#filterSearch').val('');
+            $('#filterPayer').val('');
+            $('#filterBeneficiary').val('');
+            $('#filterDateField').val('expense_date');
+            $('#filterDateFrom').val('');
+            $('#filterDateTo').val('');
             renderExpenses();
         });
 
