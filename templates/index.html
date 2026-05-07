@@ -2385,15 +2385,19 @@
         function renderBeneficiaries() {
             $('#beneficiariesList').empty();
 
-            members.forEach(function (member) {
-                $('#beneficiariesList').append(`
+            members.forEach(function (member, idx) {
+                const id = `benefit_idx_${idx}`;
+                const $row = $(`
             <div class="form-check">
-                <input class="form-check-input beneficiary-checkbox" type="checkbox" value="${member}" id="benefit_${member}">
-                <label class="form-check-label" for="benefit_${member}">
-                    ${member}
-                </label>
+                <input class="form-check-input beneficiary-checkbox" type="checkbox" id="${id}">
+                <label class="form-check-label" for="${id}"></label>
             </div>
         `);
+                // Set value và label text qua DOM API để tránh lỗi escape khi tên chứa
+                // ký tự đặc biệt (dấu nháy, dấu ngoặc, ký tự đặc biệt…)
+                $row.find('input').val(member);
+                $row.find('label').text(member);
+                $('#beneficiariesList').append($row);
             });
         }
 
@@ -3288,12 +3292,13 @@
             updateAmountPreview();
 
             // Nếu là chi tiêu cho một số người, chọn lại các checkbox
-            if (expense.benefitType === 'selected' && expense.beneficiaries) {
-                setTimeout(() => {
-                    expense.beneficiaries.forEach(member => {
-                        $(`#benefit_${member}`).prop('checked', true);
-                    });
-                }, 100);
+            if (expense.benefitType === 'selected' && Array.isArray(expense.beneficiaries)) {
+                // Bỏ trạng thái cũ trước, rồi tick theo value (an toàn với tên có dấu/khoảng trắng)
+                $('#beneficiariesList .beneficiary-checkbox').prop('checked', false);
+                const wanted = new Set(expense.beneficiaries);
+                $('#beneficiariesList .beneficiary-checkbox').each(function () {
+                    if (wanted.has(this.value)) this.checked = true;
+                });
             }
 
             // Bật edit mode: giữ nguyên expense trong mảng, chỉ đánh dấu index đang sửa
