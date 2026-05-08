@@ -1172,14 +1172,19 @@
         // Xử lý khi bấm nút tải ảnh QR
         $('#downloadQrBtn').click(function () {
             if (!allowEdit) return; // Không cho phép tải nếu ở chế độ chỉ xem
-            
+
             const qrUrl = $('#qrCodeImage').attr('src');
+            if (!qrUrl) {
+                showToast('Chưa có mã QR để tải!', 'warning');
+                return;
+            }
             const link = document.createElement('a');
             link.href = qrUrl;
             link.download = 'qr-code.png';
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
+            showToast('Đã tải ảnh QR thành công!', 'success');
         });
 
         // Format số tiền thành định dạng VND
@@ -1760,6 +1765,7 @@
             XLSX.utils.book_append_sheet(wb, ws1, 'Chi phí');
             XLSX.utils.book_append_sheet(wb, ws2, 'Theo ngày');
             XLSX.writeFile(wb, buildExportFilename('xlsx'));
+            showToast('Đã xuất Excel thành công!', 'success');
         }
 
         // Cache font Unicode (DejaVu Sans hỗ trợ tiếng Việt) cho jsPDF
@@ -1951,6 +1957,7 @@
             }
 
             doc.save(buildExportFilename('pdf'));
+            showToast('Đã xuất PDF thành công!', 'success');
         }
 
         function renderExpenses() {
@@ -2488,6 +2495,7 @@
 
                     // Tự động lưu sau khi thêm thành viên
                     saveEvent(false);
+                    showToast(`Đã thêm thành viên "${memberName}"!`, 'success');
                     // Không cần gọi autoCalculate() vì đã được gọi trong renderMembers()
                 }
             } else {
@@ -2526,6 +2534,7 @@
 
             // Tự động lưu sau khi xóa thành viên
             saveEvent(false);
+            showToast(`Đã xoá thành viên "${memberToRemove}"!`, 'success');
             // Không cần gọi autoCalculate() vì đã được gọi trong renderMembers()
         });
 
@@ -2616,6 +2625,8 @@
             // Tự động lưu sau khi thêm/cập nhật chi phí
             saveEvent(false);
 
+            showToast(isAdding ? `Đã thêm chi phí "${title}"!` : `Đã cập nhật chi phí "${title}"!`, 'success');
+
             // Focus lại ô Mục chi tiêu để nhập tiếp khi vừa thêm mới
             if (isAdding) {
                 $('#expenseTitle').trigger('focus');
@@ -2653,6 +2664,7 @@
 
             // Tự động lưu sau khi xóa chi phí
             saveEvent(false);
+            showToast(`Đã xoá chi phí "${title}"!`, 'success');
             // Không cần gọi autoCalculate() vì đã được gọi trong renderExpenses()
         });
 
@@ -2714,6 +2726,7 @@
             renderExpenses();
         });
         $('#clearFiltersBtn').click(function () {
+            const hadFilters = countActiveFilters() > 0;
             $('#filterSearch').val('');
             $('#filterPayer').val('');
             $('#filterBeneficiary').val('');
@@ -2722,6 +2735,9 @@
             $('#filterDateTo').val('');
             expenseDisplayLimit = EXPENSE_PAGE_SIZE;
             renderExpenses();
+            if (hadFilters) {
+                showToast('Đã xoá tất cả bộ lọc!', 'success');
+            }
         });
 
         // ======= Nhóm chung quỹ =======
@@ -2959,6 +2975,7 @@
                 success: function (resp) {
                     if (!resp.success) {
                         $('#ratesStatus').html(`<span class="text-danger">${resp.error || 'Lỗi không xác định'}</span>`);
+                        showToast(resp.error || 'Không lấy được tỷ giá!', 'error');
                         return;
                     }
                     const src = resp.rates || {};
@@ -2994,11 +3011,13 @@
                     if (missing.length > 0) msg += ` Không có tỷ giá cho: ${missing.join(', ')}.`;
                     $('#ratesStatus').html(`<span class="text-success">${msg}</span>`);
                     renderRatesTable();
+                    showToast(`Đã lấy ${updated} tỷ giá từ ${srcLabel}!`, 'success');
                 },
                 error: function (xhr) {
                     let err = 'Không kết nối được máy chủ.';
                     try { err = JSON.parse(xhr.responseText).error || err; } catch (_) {}
                     $('#ratesStatus').html(`<span class="text-danger">${err}</span>`);
+                    showToast(err, 'error');
                 },
                 complete: function () {
                     $btn.prop('disabled', false).html('<i class="fas fa-sync-alt me-1"></i>Lấy tỷ giá');
@@ -3040,11 +3059,17 @@
                 showToast('Vui lòng nhập mã tiền tệ (không phải VND).', 'warning');
                 return;
             }
+            const isNew = !ratesDraft[code];
             if (!ratesDraft[code]) {
                 ratesDraft[code] = { rate: null, source: 'missing' };
             }
             $('#addCurrencyCode').val('');
             renderRatesTable();
+            if (isNew) {
+                showToast(`Đã thêm tiền tệ ${code}. Vui lòng nhập tỷ giá!`, 'success');
+            } else {
+                showToast(`Tiền tệ ${code} đã có sẵn trong danh sách.`, 'info');
+            }
         });
 
         $('#saveRatesBtn').click(function () {
@@ -3078,6 +3103,9 @@
             if (!allowEdit) return; // Không cho phép tính toán nếu ở chế độ chỉ xem
 
             calculateSplit(true); // Hiển thị thông báo lỗi nếu có
+            if ($('#resultContainer').is(':visible')) {
+                showToast('Đã tính toán chia tiền!', 'success');
+            }
         });
 
         // Xử lý lưu sự kiện (hiện thông báo)
@@ -3190,6 +3218,7 @@
             }
             if (confirm('Bạn có chắc chắn muốn tạo sự kiện mới? Dữ liệu hiện tại đã được lưu.')) {
                 createNewEvent();
+                showToast('Đã tạo sự kiện mới!', 'success');
             }
         });
 
