@@ -793,6 +793,8 @@
         let ratesDraft = {}; // bản nháp khi mở modal
         let sortOrder = 'newest'; // 'newest' hoặc 'oldest'
         let allowEdit = true; // Mặc định cho phép sửa
+        const EXPENSE_PAGE_SIZE = 10;
+        let expenseDisplayLimit = EXPENSE_PAGE_SIZE;
 
         // Danh sách tiền tệ thông dụng cho dropdown
         const COMMON_CURRENCIES = [
@@ -1967,9 +1969,13 @@
                 return;
             }
 
+            const visibleLimit = Math.min(expenseDisplayLimit, filtered.length);
+            let renderedCount = 0;
             sortedExpenses.forEach(function (expense, displayIndex) {
                 // Bỏ qua nếu không khớp bộ lọc, nhưng STT vẫn theo full sortedExpenses
                 if (!filteredSet.has(expense)) return;
+                if (renderedCount >= visibleLimit) return;
+                renderedCount++;
                 // Tìm index gốc trong mảng expenses
                 const index = expenses.indexOf(expense);
                 // Số thứ tự: cũ→mới hiển thị 1..n, mới→cũ hiển thị n..1
@@ -2043,6 +2049,18 @@
         </div>
         `);
             });
+
+            const remaining = filtered.length - visibleLimit;
+            if (remaining > 0) {
+                const nextBatch = Math.min(EXPENSE_PAGE_SIZE, remaining);
+                $('#expensesList').append(`
+                    <div class="text-center mt-2">
+                        <button type="button" class="btn btn-outline-primary btn-sm" id="loadMoreExpensesBtn">
+                            <i class="fas fa-chevron-down me-1"></i>Tải thêm ${nextBatch} (còn ${remaining})
+                        </button>
+                    </div>
+                `);
+            }
 
             autoCalculate();
         }
@@ -2633,15 +2651,22 @@
         $('#sortExpensesBtn').click(function () {
             // Đảo ngược thứ tự sắp xếp
             sortOrder = sortOrder === 'newest' ? 'oldest' : 'newest';
-            
+
             // Cập nhật text hiển thị
             $('#sortText').text(sortOrder === 'newest' ? 'Mới nhất' : 'Cũ nhất');
-            
+
             // Cập nhật icon
             const icon = sortOrder === 'newest' ? 'fa-sort-down' : 'fa-sort-up';
             $('#sortExpensesBtn i').removeClass('fa-sort fa-sort-up fa-sort-down').addClass(icon);
-            
+
             // Render lại danh sách chi phí
+            expenseDisplayLimit = EXPENSE_PAGE_SIZE;
+            renderExpenses();
+        });
+
+        // Tải thêm chi phí (mỗi lần +10)
+        $('#expensesList').on('click', '#loadMoreExpensesBtn', function () {
+            expenseDisplayLimit += EXPENSE_PAGE_SIZE;
             renderExpenses();
         });
 
@@ -2649,9 +2674,13 @@
         let _filterSearchTimer = null;
         $('#filterSearch').on('input', function () {
             clearTimeout(_filterSearchTimer);
-            _filterSearchTimer = setTimeout(renderExpenses, 150);
+            _filterSearchTimer = setTimeout(function () {
+                expenseDisplayLimit = EXPENSE_PAGE_SIZE;
+                renderExpenses();
+            }, 150);
         });
         $('#filterPayer, #filterBeneficiary, #filterDateField, #filterDateFrom, #filterDateTo').on('change', function () {
+            expenseDisplayLimit = EXPENSE_PAGE_SIZE;
             renderExpenses();
         });
         $('#clearFiltersBtn').click(function () {
@@ -2661,6 +2690,7 @@
             $('#filterDateField').val('expense_date');
             $('#filterDateFrom').val('');
             $('#filterDateTo').val('');
+            expenseDisplayLimit = EXPENSE_PAGE_SIZE;
             renderExpenses();
         });
 
