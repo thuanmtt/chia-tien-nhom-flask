@@ -1570,6 +1570,7 @@
                 dailyStatsChartInstance.data.labels = labels;
                 dailyStatsChartInstance.data.datasets[0].data = totals;
                 dailyStatsChartInstance.data.datasets[0]._counts = counts;
+                dailyStatsChartInstance.data.datasets[0]._dateKeys = dateKeys;
                 dailyStatsChartInstance.update();
                 return;
             }
@@ -1582,6 +1583,7 @@
                         label: 'Tổng chi phí (VND)',
                         data: totals,
                         _counts: counts,
+                        _dateKeys: dateKeys,
                         backgroundColor: 'rgba(13, 110, 253, 0.6)',
                         borderColor: 'rgba(13, 110, 253, 1)',
                         borderWidth: 1,
@@ -1591,6 +1593,33 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    onClick: function (evt, elements, chart) {
+                        if (!elements || !elements.length) return;
+                        const idx = elements[0].index;
+                        const keys = chart.data.datasets[0]._dateKeys || [];
+                        const key = keys[idx];
+                        if (!key) return;
+                        if (key === '__no_date__') {
+                            showToast('Không thể lọc theo chi phí chưa có ngày.', 'warning');
+                            return;
+                        }
+                        $('#filterDateField').val('expense_date');
+                        $('#filterDateFrom').val(key);
+                        $('#filterDateTo').val(key);
+                        const $filtersBody = $('#expenseFiltersBody');
+                        if (!$filtersBody.hasClass('show') && window.bootstrap && bootstrap.Collapse) {
+                            bootstrap.Collapse.getOrCreateInstance($filtersBody[0]).show();
+                        }
+                        expenseDisplayLimit = EXPENSE_PAGE_SIZE;
+                        renderExpenses();
+                        showToast(`Đã lọc theo ngày ${formatExpenseDateForDisplay(key)}.`, 'info');
+                    },
+                    onHover: function (evt, elements) {
+                        const target = evt && evt.native ? evt.native.target : null;
+                        if (target && target.style) {
+                            target.style.cursor = elements && elements.length ? 'pointer' : 'default';
+                        }
+                    },
                     plugins: {
                         legend: { display: false },
                         tooltip: {
@@ -1599,7 +1628,8 @@
                                     const cnt = ctx.dataset._counts ? ctx.dataset._counts[ctx.dataIndex] : 0;
                                     return [
                                         `Tổng: ${formatCurrency(ctx.parsed.y)}`,
-                                        `Số chi phí: ${cnt}`
+                                        `Số chi phí: ${cnt}`,
+                                        'Bấm để lọc theo ngày này'
                                     ];
                                 }
                             }
