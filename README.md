@@ -1,6 +1,6 @@
 # Ứng Dụng Chia Tiền Nhóm - Flask Version
 
-Ứng dụng chia tiền nhóm online nhanh chóng và tiện lợi, được xây dựng bằng Flask với SQLite database.
+Ứng dụng chia tiền nhóm online nhanh chóng và tiện lợi, được xây dựng bằng Flask với Postgres (deploy trên Vercel).
 
 ## Tính năng chính
 
@@ -11,13 +11,14 @@
 - ✅ Chia sẻ sự kiện qua event_code
 - ✅ Cấu hình thông tin ngân hàng cho từng thành viên
 - ✅ Tạo QR code chuyển tiền
-- ✅ Lưu trữ dữ liệu trên SQLite database
+- ✅ Lưu trữ dữ liệu trên Postgres (Vercel/Neon)
 
 ## Cài đặt và chạy
 
 ### Yêu cầu hệ thống
-- Python 3.7+
+- Python 3.9+
 - pip
+- Một database Postgres (Neon/Vercel Postgres, hoặc Postgres local)
 
 ### Cài đặt
 
@@ -32,23 +33,37 @@ cd chia-tien-nhom-flask
 pip install -r requirements.txt
 ```
 
-3. Chạy ứng dụng:
+3. Tạo bảng (chạy 1 lần trên database):
 ```bash
-python app.py
+psql "$DATABASE_URL" -f schema.sql
 ```
 
-4. Mở trình duyệt và truy cập:
+4. Chạy ứng dụng:
+```bash
+DATABASE_URL=postgres://... python vercel_app.py
 ```
-http://localhost:5001
+
+5. Mở trình duyệt và truy cập:
 ```
+http://localhost:5002
+```
+
+### Deploy Vercel
+
+Repo đã có sẵn `vercel.json` (entry `api/index.py` → `vercel_app.py`). Chỉ cần
+đặt env `DATABASE_URL` (hoặc `POSTGRES_URL`) trong project settings và chạy
+`schema.sql` trên database trước lần deploy đầu.
 
 ## Cấu trúc dự án
 
 ```
 chia-tien-nhom-flask/
-├── app.py                 # Flask app chính
+├── vercel_app.py          # Flask app chính (Postgres)
+├── api/index.py           # Entry point cho Vercel
+├── validation.py          # Validate payload API
+├── schema.sql             # Schema + migration Postgres
+├── vercel.json            # Cấu hình Vercel
 ├── requirements.txt       # Python dependencies
-├── events.db             # SQLite database (tự động tạo)
 ├── templates/
 │   └── index.html        # Template chính
 └── static/

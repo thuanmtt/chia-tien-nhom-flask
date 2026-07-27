@@ -3,10 +3,12 @@
 Test script cho Flask app
 """
 
-import requests
-import json
+import os
 
-BASE_URL = "http://localhost:5001"
+import requests
+
+# vercel_app.py chạy local ở port 5002; override bằng env khi cần
+BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5002')
 
 def test_banks_api():
     """Test API lấy danh sách ngân hàng"""
