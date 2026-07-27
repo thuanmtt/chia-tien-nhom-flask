@@ -18,9 +18,15 @@ psql "$DATABASE_URL" -f schema.sql
 # Integration tests (plain script, not pytest) — needs a running server + real DB.
 # Creates and deletes a real event; BASE_URL defaults to http://localhost:5002
 BASE_URL=http://localhost:5002 python3 test_api.py
+
+# Unit tests for the split algorithm (pure logic, no server/DB needed)
+node test_split.js
+
+# Syntax-check the frontend
+node --check static/app.js && node --check static/split.js && node --check static/sw.js
 ```
 
-There is no linter, bundler, or JS build step. To syntax-check the frontend, extract the inline `<script>` blocks from `templates/index.html` and run `node --check` on them.
+There is no linter, bundler, or JS build step.
 
 When Postgres is unavailable locally, test backend logic by monkeypatching `vercel_app.get_db_connection` with a fake conn/cursor (in-memory dict of rows) and using `app.test_client()`. Routes that don't touch the DB (`/`, `/api/banks`, `/sw.js`, `/manifest.json`) work without any stub.
 
@@ -38,9 +44,11 @@ When Postgres is unavailable locally, test backend logic by monkeypatching `verc
 
 **Share links** — view: `/?event_code=X`; edit: `/?event_code=X&key=<edit_key>`. `/share/<code>` and `/event/<code>` are legacy routes that redirect to `/?event_code=X` (the JS also keeps a `/share/` path branch for the offline/service-worker fallback case). `index.html` contains no Jinja expressions; all routing state is parsed from the URL in JS.
 
-**Frontend** — `templates/index.html` is the entire SPA (~3.5k lines of inline JS/CSS; jQuery + Bootstrap from CDN). Key state lives in localStorage: `currentEventCode`, `savedEventCodes` (the "Sự Kiện Của Tôi" list), `eventEditKeys` (map event_code → edit key), `bankInfo`. `loadEventFromServer` sends the stored key, sets `allowEdit` from `can_edit`, deletes invalid keys, and flips the UI to view-only; a 403 on save does the same.
+**Frontend** — SPA in three files: `templates/index.html` (markup only, no Jinja), `static/app.css`, and `static/app.js` (~2.8k lines; jQuery + Bootstrap from CDN). `static/split.js` holds the pure split-money logic (`SplitLogic`, UMD — used by `app.js` in the browser and by `test_split.js` in Node); `app.js` only binds it to page state and renders. Key state lives in localStorage: `currentEventCode`, `savedEventCodes` (the "Sự Kiện Của Tôi" list, loaded via one batch `POST /api/events/lookup` — codes missing from the response get pruned), `eventEditKeys` (map event_code → edit key), `bankInfo`. `loadEventFromServer` sends the stored key, sets `allowEdit` from `can_edit`, deletes invalid keys, and flips the UI to view-only; a 403 on save does the same. Confirmation dialogs go through `showConfirm()` (the shared `#confirmModal`, which must stay LAST among the modals in the DOM so it stacks on top) — don't reintroduce native `confirm()`. `saveEvent` drives the `#saveStatus` header indicator (`setSaveStatus`: saving/saved/error).
 
-**Money model** — all computation is normalized to VND. Expenses may carry a foreign `currency`; conversion uses the per-event `rates` map (`amountInVND()` returns `null` when a rate is missing, which blocks calculation and shows warnings). Exchange rates come from `/api/exchange-rates` with a fallback chain (fawazahmed0 → open.er-api.com → Vietcombank). The split algorithm (`calculateSplit`) is client-side: per-member balances → "nhóm chung quỹ" (couples) merged into a primary member → greedy creditor/debtor matching. Beneficiaries semantics: `benefitType === 'all'` means the CURRENT member list at calculation time (the stored `beneficiaries` snapshot is ignored — see `getExpenseBeneficiaries()`); only `'selected'` uses the stored list.
+**Service worker** (`static/sw.js`) — `/static/app.js`, `app.css`, `split.js` are served network-first (they change on deploy and have no hashed filenames); icons/banks.json are cache-first. Bump `CACHE_VERSION` when changing caching behavior.
+
+**Money model** — all computation is normalized to VND. Expenses may carry a foreign `currency`; conversion uses the per-event `rates` map (`amountInVND()` returns `null` when a rate is missing, which blocks calculation and shows warnings). Exchange rates come from `/api/exchange-rates` with a fallback chain (fawazahmed0 → open.er-api.com → Vietcombank). The split algorithm is client-side in `SplitLogic.computeSplit` (`static/split.js`, unit-tested by `test_split.js`): per-member balances → "nhóm chung quỹ" (couples) merged into a primary member → balances rounded to integer VND with rounding drift folded into the largest balance (so transfers settle exactly, no 1-đồng leftovers) → greedy creditor/debtor matching. Beneficiaries semantics: `benefitType === 'all'` means the CURRENT member list at calculation time (the stored `beneficiaries` snapshot is ignored — see `getExpenseBeneficiaries()`); only `'selected'` uses the stored list.
 
 ## Conventions and gotchas
 

@@ -1,0 +1,157 @@
+        body {
+            background-color: #f8f9fa;
+        }
+
+        .card {
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+
+        .form-control:focus {
+            box-shadow: none;
+            border-color: #6c757d;
+        }
+
+        .btn-primary {
+            background-color: #5c6bc0;
+            border-color: #5c6bc0;
+        }
+
+        .btn-primary:hover {
+            background-color: #4d5aa7;
+            border-color: #4d5aa7;
+        }
+
+        .member-pill {
+            border-radius: 20px;
+            padding: 5px 10px;
+            margin: 5px;
+            display: inline-block;
+            background-color: #e9ecef;
+        }
+
+        .member-close {
+            margin-left: 5px;
+            cursor: pointer;
+            color: #6c757d;
+        }
+
+        .expense-item {
+            border-left: 4px solid #5c6bc0;
+            padding-left: 10px;
+            margin-bottom: 10px;
+        }
+
+        .transfer-item {
+            background-color: #e9f7ef;
+            border-radius: 5px;
+            padding: 10px;
+            margin-bottom: 5px;
+        }
+
+        .couple-badge {
+            display: inline-flex;
+            align-items: center;
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 10px;
+            background: #fde7f3;
+            color: #c2185b;
+            margin-left: 6px;
+            white-space: nowrap;
+        }
+        .couple-badge .primary-dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: #c2185b;
+            margin-right: 4px;
+        }
+        .couple-row {
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 10px;
+            margin-bottom: 10px;
+            background: #fafafa;
+        }
+        .couple-row .couple-member-options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px 14px;
+            margin-top: 6px;
+        }
+        .couple-row .couple-member-options label {
+            font-size: 0.9rem;
+            user-select: none;
+        }
+
+        .header-icon {
+            margin-right: 10px;
+            color: #5c6bc0;
+        }
+
+        .action-btn {
+            cursor: pointer;
+            color: #6c757d;
+            margin-left: 5px;
+        }
+
+        .action-btn:hover {
+            color: #5c6bc0;
+        }
+
+        .event-item {
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .event-item:hover {
+            background-color: #f8f9fa;
+        }
+        .select2-container--default .select2-selection--single .select2-selection__rendered img {
+            height: 16px;
+            width: auto;
+            margin-right: 10px;
+            vertical-align: middle;
+            object-fit: contain;
+        }
+        .select2-results__option img {
+            height: 16px;
+            width: auto;
+            margin-right: 10px;
+            vertical-align: middle;
+            object-fit: contain;
+        }
+        .select2-container--default .select2-selection--single .select2-selection__rendered {
+            display: flex;
+            align-items: center;
+        }
+        .select2-results__option {
+            display: flex !important;
+            align-items: center;
+        }
+    /* --- Responsive cho phần header nhóm --- */
+    @media (max-width: 576px) {
+        .group-header .d-flex {
+            flex-direction: column !important;
+            align-items: flex-start !important;
+        }
+        .group-title {
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        .group-actions {
+            width: 100%;
+            display: flex;
+            flex-direction: row;
+            flex-wrap: wrap;
+            gap: 6px;
+            justify-content: flex-start;
+        }
+        .group-actions .btn {
+            flex: 1 1 100px;
+            min-width: 0;
+            font-size: 0.95rem;
+            padding: 4px 6px;
+        }
+    }

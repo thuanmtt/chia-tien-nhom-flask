@@ -103,6 +103,36 @@ def test_get_event(event_code, edit_key):
         print(f"❌ Get event failed - Status: {response.status_code}")
         return False
 
+def test_lookup_events(event_code):
+    """Test API batch lookup cho danh sách 'Sự Kiện Của Tôi'"""
+    print("Testing lookup events API...")
+
+    response = requests.post(
+        f"{BASE_URL}/api/events/lookup",
+        json={"codes": [event_code, "KHONG-TON-TAI"]},
+    )
+    if response.status_code != 200:
+        print(f"❌ Lookup failed - Status: {response.status_code}")
+        return False
+    events = response.json().get('events') or []
+    codes = [e.get('event_code') for e in events]
+    if codes != [event_code]:
+        print(f"❌ Lookup phải trả đúng 1 sự kiện tồn tại, nhận: {codes}")
+        return False
+    if any('edit_key' in e or 'bank_info' in e or 'bankInfo' in e for e in events):
+        print("❌ Lookup leaked edit_key/bank_info!")
+        return False
+
+    # codes không hợp lệ phải bị 400
+    for bad in ({"codes": "abc"}, {"codes": [123]}, {}):
+        r = requests.post(f"{BASE_URL}/api/events/lookup", json=bad)
+        if r.status_code != 400:
+            print(f"❌ Lookup với payload {bad} phải trả 400, nhận {r.status_code}")
+            return False
+
+    print("✅ Lookup events OK (batch + validate + không lộ dữ liệu nhạy cảm)")
+    return True
+
 def test_update_event(event_code, edit_key):
     """Test cập nhật sự kiện"""
     print(f"Testing update event API for {event_code}...")
@@ -223,6 +253,10 @@ def main():
 
     # Test get event
     if not test_get_event(event_code, edit_key):
+        return
+
+    # Test batch lookup
+    if not test_lookup_events(event_code):
         return
 
     # Test update event

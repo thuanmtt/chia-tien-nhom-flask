@@ -200,6 +200,48 @@ def create_event():
         return _server_error(e)
 
 
+@app.route('/api/events/lookup', methods=['POST'])
+@limiter.limit('30 per minute; 500 per day')
+def lookup_events():
+    """Tải nhiều sự kiện trong 1 request cho danh sách "Sự Kiện Của Tôi"
+    (thay cho N request GET riêng lẻ). Chỉ trả các trường cần cho danh sách —
+    không có bank_info và tuyệt đối không có edit_key."""
+    try:
+        body = request.get_json(silent=True)
+        codes = body.get('codes') if isinstance(body, dict) else None
+        if (not isinstance(codes, list) or len(codes) > 50
+                or not all(isinstance(c, str) and 0 < len(c) <= 64 for c in codes)):
+            return jsonify({'success': False, 'error': 'Danh sách mã sự kiện không hợp lệ.'}), 400
+        if not codes:
+            return jsonify({'success': True, 'events': []})
+
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
+            '''
+            SELECT event_code, title, members, expenses, rates, updated_at
+            FROM events WHERE event_code = ANY(%s)
+            ''',
+            (codes,),
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+
+        events = [{
+            'event_code': r['event_code'],
+            'title': r['title'],
+            'members': json.loads(r['members']) if r['members'] else [],
+            'expenses': json.loads(r['expenses']) if r['expenses'] else [],
+            'rates': json.loads(r['rates']) if r['rates'] else {},
+            'updated_at': r['updated_at'].isoformat() if r['updated_at'] else None,
+        } for r in rows]
+        return jsonify({'success': True, 'events': events})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return _server_error(e)
+
+
 @app.route('/api/events/<event_code>', methods=['GET'])
 @limiter.limit('120 per minute')
 def get_event(event_code):

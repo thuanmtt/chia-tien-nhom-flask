@@ -1,10 +1,13 @@
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 const STATIC_CACHE = `chia-tien-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `chia-tien-runtime-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
   '/',
   '/manifest.json',
+  '/static/app.css',
+  '/static/app.js',
+  '/static/split.js',
   '/static/icons/icon.svg',
   '/static/icons/icon-192.png',
   '/static/icons/icon-512.png',
@@ -13,6 +16,14 @@ const PRECACHE_URLS = [
   '/static/icons/favicon-96x96.png',
   '/static/banks.json'
 ];
+
+// Asset lõi của app thay đổi theo mỗi lần deploy (không có hash trong tên
+// file) → network-first để người dùng luôn nhận bản mới, offline vẫn có cache
+const NETWORK_FIRST_PATHS = new Set([
+  '/static/app.css',
+  '/static/app.js',
+  '/static/split.js'
+]);
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -50,6 +61,12 @@ self.addEventListener('fetch', (event) => {
   // Navigation requests: network-first so users get the latest HTML
   if (request.mode === 'navigate') {
     event.respondWith(networkFirst(request, '/'));
+    return;
+  }
+
+  // App core assets (JS/CSS): network-first to avoid serving stale code
+  if (NETWORK_FIRST_PATHS.has(url.pathname)) {
+    event.respondWith(networkFirst(request));
     return;
   }
 
