@@ -66,19 +66,35 @@ def test_create_event():
         print(f"❌ Create event failed - Status: {response.status_code}")
         return None, None
 
-def test_get_event(event_code):
-    """Test lấy thông tin sự kiện"""
+def test_get_event(event_code, edit_key):
+    """Test lấy thông tin sự kiện + cờ can_edit"""
     print(f"Testing get event API for {event_code}...")
-    response = requests.get(f"{BASE_URL}/api/events/{event_code}")
-    
+
+    # Không key / sai key -> can_edit phải là False
+    for headers, label in (({}, 'không key'), ({'X-Edit-Key': 'sai-key'}, 'sai key')):
+        response = requests.get(f"{BASE_URL}/api/events/{event_code}", headers=headers)
+        if response.status_code != 200:
+            print(f"❌ Get event failed - Status: {response.status_code}")
+            return False
+        event = response.json().get('event') or {}
+        if 'edit_key' in event:
+            print("❌ Get event leaked edit_key!")
+            return False
+        if event.get('can_edit') is not False:
+            print(f"❌ can_edit phải là False khi {label}, nhận: {event.get('can_edit')}")
+            return False
+    print("✅ can_edit=False khi không có/sai key")
+
+    # Key đúng -> can_edit=True
+    response = requests.get(f"{BASE_URL}/api/events/{event_code}", headers={'X-Edit-Key': edit_key})
     if response.status_code == 200:
         data = response.json()
         if data.get('success'):
             event = data.get('event')
-            if 'edit_key' in event:
-                print("❌ Get event leaked edit_key!")
+            if event.get('can_edit') is not True:
+                print(f"❌ can_edit phải là True với key đúng, nhận: {event.get('can_edit')}")
                 return False
-            print(f"✅ Get event OK - Title: {event.get('title')}")
+            print(f"✅ Get event OK - Title: {event.get('title')} (can_edit=True với key đúng)")
             return True
         else:
             print(f"❌ Get event failed - {data.get('error')}")
@@ -183,7 +199,7 @@ def main():
         return
 
     # Test get event
-    if not test_get_event(event_code):
+    if not test_get_event(event_code, edit_key):
         return
 
     # Test update event

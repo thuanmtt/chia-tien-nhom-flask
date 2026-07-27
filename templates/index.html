@@ -930,42 +930,32 @@
         // Kiểm tra xem có event_code trong URL không
         const urlParams = new URLSearchParams(window.location.search);
         const urlEventCode = urlParams.get('event_code');
-        const urlAllowEdit = urlParams.get('allow_edit');
         const urlEditKey = urlParams.get('key');
         
-        // Kiểm tra route share (chỉ xem)
+        // Quyền chỉnh sửa do SERVER quyết định: GET event trả về cờ can_edit
+        // dựa trên khóa X-Edit-Key gửi kèm. Có khóa hợp lệ → giao diện chỉnh sửa,
+        // không có/sai khóa → giao diện chỉ xem (loadEventFromServer xử lý).
         if (window.location.pathname.startsWith('/share/')) {
+            // Link chỉ-xem kiểu cũ (/share/<code>) — giữ tương thích, luôn chỉ xem
             allowEdit = false;
-            // Xóa state của sự kiện trước đó để tránh rò rỉ sang phiên khác
             localStorage.removeItem('currentEventCode');
-            // Lấy event_code từ path
             const pathParts = window.location.pathname.split('/');
             if (pathParts.length >= 3) {
                 currentEventCode = pathParts[2];
-                loadEventFromServer(currentEventCode);
+                loadEventFromServer(currentEventCode, { forceViewOnly: true });
             }
         } else if (urlEventCode) {
-            // Link chỉnh sửa mới kèm khóa: lưu khóa để các request PUT/DELETE dùng
+            // Link chia sẻ /?event_code=X[&key=...]: lưu khóa nếu có,
+            // server sẽ xác nhận quyền thật qua can_edit
             if (urlEditKey) {
                 setEditKey(urlEventCode, urlEditKey);
-                allowEdit = true;
-            } else if (urlAllowEdit === 'true') {
-                allowEdit = true;
-            } else if (urlAllowEdit === 'false') {
-                allowEdit = false;
             }
-
+            // Trạng thái tạm trong lúc chờ server: có khóa → giả định sửa được,
+            // không khóa → chỉ xem (tránh nháy giao diện sai cho người xem)
+            allowEdit = !!(urlEditKey || getEditKey(urlEventCode));
             currentEventCode = urlEventCode;
-            if (allowEdit) {
-                localStorage.setItem('currentEventCode', currentEventCode);
-                saveEventCodeToLocalStorage(currentEventCode); // Lưu event_code vào localStorage
-            } else {
-                // Chế độ chỉ xem: không lưu để tránh leo thang quyền khi quay lại "/"
-                localStorage.removeItem('currentEventCode');
-            }
             loadEventFromServer(currentEventCode);
         } else if (currentEventCode) {
-            saveEventCodeToLocalStorage(currentEventCode); // Lưu event_code vào localStorage
             loadEventFromServer(currentEventCode);
         } else {
             // Tạo sự kiện mới
@@ -1313,6 +1303,14 @@
             localStorage.setItem('eventEditKeys', JSON.stringify(map));
         }
 
+        function removeEditKey(eventCode) {
+            const map = getEditKeyMap();
+            if (eventCode in map) {
+                delete map[eventCode];
+                localStorage.setItem('eventEditKeys', JSON.stringify(map));
+            }
+        }
+
         // Sự kiện cũ (tạo trước khi có edit key): tự sinh khóa gửi lên,
         // server sẽ "nhận" khóa này cho sự kiện chưa có khóa.
         function getOrCreateEditKey(eventCode) {
@@ -1327,11 +1325,13 @@
         }
 
         function buildShareLinks(eventCode) {
-            const viewOnly = window.location.origin + '/share/' + encodeURIComponent(eventCode);
+            const base = window.location.origin + '/?event_code=' + encodeURIComponent(eventCode);
             const key = getEditKey(eventCode);
-            let editable = window.location.origin + '/?event_code=' + encodeURIComponent(eventCode);
-            editable += key ? ('&key=' + encodeURIComponent(key)) : '&allow_edit=true';
-            return { viewOnly, editable };
+            return {
+                viewOnly: base,
+                // Sự kiện cũ chưa có khóa: chưa phân biệt được quyền → hai link như nhau
+                editable: key ? `${base}&key=${encodeURIComponent(key)}` : base,
+            };
         }
         // ===== Hết phần khóa chỉnh sửa =====
 
@@ -1368,7 +1368,11 @@
                     },
                     error: function(xhr) {
                         if (xhr.status === 403) {
-                            showToast('Bạn không có quyền chỉnh sửa sự kiện này. Hãy dùng link chỉnh sửa mà người tạo chia sẻ.', 'error');
+                            // Khóa không còn hợp lệ → chuyển giao diện về chế độ chỉ xem
+                            showToast('Bạn không có quyền chỉnh sửa sự kiện này — chuyển về chế độ chỉ xem.', 'error');
+                            removeEditKey(currentEventCode);
+                            allowEdit = false;
+                            updateUIForEditMode();
                         } else {
                             showToast('Lỗi khi cập nhật sự kiện!', 'error');
                         }
@@ -1402,16 +1406,33 @@
             }
         }
 
-        // Hàm tải sự kiện từ server
-        function loadEventFromServer(eventCode) {
+        // Hàm tải sự kiện từ server.
+        // Gửi kèm khóa chỉnh sửa (nếu có) để server trả về can_edit —
+        // cờ này quyết định giao diện chỉnh sửa hay chỉ xem.
+        function loadEventFromServer(eventCode, opts) {
+            opts = opts || {};
+            const storedKey = opts.forceViewOnly ? null : getEditKey(eventCode);
             $.ajax({
                 url: `/api/events/${eventCode}`,
                 method: 'GET',
+                headers: storedKey ? { 'X-Edit-Key': storedKey } : {},
                 success: function(response) {
                     if (response.success) {
                         const eventData = response.event;
                         currentEventCode = eventData.event_code;
-                        
+
+                        // Quyền chỉnh sửa do server xác nhận
+                        if (opts.forceViewOnly) {
+                            allowEdit = false;
+                        } else {
+                            allowEdit = !!eventData.can_edit;
+                            if (!allowEdit && storedKey) {
+                                // Khóa sai hoặc đã bị đổi — bỏ khóa hỏng, chuyển chỉ xem
+                                removeEditKey(eventCode);
+                                showToast('Khóa chỉnh sửa không đúng — đang mở ở chế độ chỉ xem.', 'warning');
+                            }
+                        }
+
                         // Cập nhật tên sự kiện
                         $('#eventTitle').text(eventData.title);
                         // Sau khi set currentEventCode hoặc tạo mới sự kiện, cập nhật eventCodeDisplay

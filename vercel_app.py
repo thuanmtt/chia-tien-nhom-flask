@@ -202,12 +202,19 @@ def get_event(event_code):
         if event:
             couples_raw = event.get('couples') if isinstance(event, dict) else None
             rates_raw = event.get('rates') if isinstance(event, dict) else None
+            # Quyền sửa: sự kiện chưa có khóa (legacy) → ai cũng sửa được;
+            # có khóa → chỉ khi header X-Edit-Key khớp. UI dựa vào cờ này
+            # để hiện giao diện chỉnh sửa hay chỉ xem.
+            stored_key = event.get('edit_key')
+            provided = _provided_edit_key()
+            can_edit = (not stored_key) or bool(provided and hmac.compare_digest(stored_key, provided))
             return jsonify({
                 'success': True,
                 'event': {
                     'id': event['id'],
                     'event_code': event['event_code'],
                     'title': event['title'],
+                    'can_edit': can_edit,
                     'members': json.loads(event['members']),
                     'expenses': json.loads(event['expenses']),
                     'bankInfo': json.loads(event['bank_info']) if event['bank_info'] else {},

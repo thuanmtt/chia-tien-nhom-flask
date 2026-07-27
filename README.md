@@ -74,9 +74,17 @@ chia-tien-nhom-flask/
 
 ### Events
 - `POST /api/events` - Tạo sự kiện mới (response chứa `edit_key` — chỉ trả về 1 lần duy nhất)
-- `GET /api/events/<event_code>` - Lấy thông tin sự kiện (không bao giờ trả `edit_key`)
+- `GET /api/events/<event_code>` - Lấy thông tin sự kiện. Nhận header `X-Edit-Key`
+  (tùy chọn) và trả về cờ `can_edit` cho biết key đó có quyền sửa không —
+  UI dựa vào cờ này để hiện giao diện chỉnh sửa hay chỉ xem. Không bao giờ trả `edit_key`.
 - `PUT /api/events/<event_code>` - Cập nhật sự kiện (yêu cầu header `X-Edit-Key`)
 - `DELETE /api/events/<event_code>` - Xóa sự kiện (yêu cầu header `X-Edit-Key`)
+
+Link chia sẻ:
+- Chỉ xem: `/?event_code=<event_code>`
+- Chỉnh sửa: `/?event_code=<event_code>&key=<edit_key>`
+- `/share/<event_code>` (định dạng cũ) vẫn hoạt động ở chế độ chỉ xem để
+  các link đã gửi đi không bị chết.
 
 Sự kiện tạo trước khi có cơ chế `edit_key` (cột NULL trong DB) sẽ được "nhận" key
 từ lần ghi hợp lệ đầu tiên có gửi `X-Edit-Key`; từ đó về sau key này là bắt buộc.
