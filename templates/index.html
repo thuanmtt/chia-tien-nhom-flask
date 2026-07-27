@@ -804,6 +804,10 @@
         let allowEdit = true; // Mặc định cho phép sửa
         const EXPENSE_PAGE_SIZE = 10;
         let expenseDisplayLimit = EXPENSE_PAGE_SIZE;
+        // Trạng thái lưu: tuần tự hóa request + mốc updated_at cho optimistic locking
+        let saveInFlight = false;
+        let savePendingAgain = false;
+        let lastKnownUpdatedAt = null;
 
         // Escape HTML để chống XSS khi render dữ liệu người dùng
         // (tên thành viên, tiêu đề chi phí, tên sự kiện, tên nhóm...)
@@ -880,6 +884,20 @@
             const rate = getRateToVND(cur);
             if (rate === null) return null; // thiếu tỷ giá
             return amt * rate;
+        }
+
+        // Người hưởng của một chi phí:
+        // - 'all' (hoặc thiếu benefitType): LUÔN là danh sách thành viên HIỆN TẠI,
+        //   không dùng snapshot lúc tạo — để thành viên thêm sau vẫn được chia
+        //   vào các khoản "cho tất cả" đúng như UI hiển thị
+        // - 'selected': danh sách đã chọn, lọc theo thành viên còn tồn tại
+        function getExpenseBeneficiaries(expense) {
+            if (expense && expense.benefitType === 'selected'
+                && Array.isArray(expense.beneficiaries) && expense.beneficiaries.length > 0) {
+                const valid = expense.beneficiaries.filter(m => members.includes(m));
+                if (valid.length > 0) return valid;
+            }
+            return members;
         }
 
         function collectCurrenciesFromExpenses() {
@@ -1180,22 +1198,33 @@
             $('#qrCodeModal').modal('show');
         });
 
-        // Xử lý khi bấm nút tải ảnh QR
-        $('#downloadQrBtn').click(function () {
-            if (!allowEdit) return; // Không cho phép tải nếu ở chế độ chỉ xem
-
+        // Xử lý khi bấm nút tải ảnh QR (cho phép cả ở chế độ chỉ xem —
+        // người nhận link chính là người cần QR để chuyển tiền)
+        $('#downloadQrBtn').click(async function () {
             const qrUrl = $('#qrCodeImage').attr('src');
             if (!qrUrl) {
                 showToast('Chưa có mã QR để tải!', 'warning');
                 return;
             }
-            const link = document.createElement('a');
-            link.href = qrUrl;
-            link.download = 'qr-code.png';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            showToast('Đã tải ảnh QR thành công!', 'success');
+            // Ảnh nằm ở domain khác (qr.sepay.vn) nên thuộc tính `download`
+            // bị trình duyệt bỏ qua → phải tải qua fetch → blob
+            try {
+                const resp = await fetch(qrUrl);
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const blob = await resp.blob();
+                const objUrl = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = objUrl;
+                link.download = 'qr-chuyen-tien.png';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(objUrl);
+                showToast('Đã tải ảnh QR thành công!', 'success');
+            } catch (err) {
+                // fetch bị chặn (CORS/mạng) — dùng chế độ download của sepay
+                window.open(qrUrl.replace('download=false', 'download=true'), '_blank');
+            }
         });
 
         // Format số tiền thành định dạng VND
@@ -1217,13 +1246,15 @@
             const previewSpan = $('#amountPreview span');
             const currency = $('#expenseCurrency').val() || 'VND';
 
-            let amount = amountInput.val().trim();
+            const amount = amountInput.val().trim();
 
-            if (amount && !isNaN(amount)) {
+            if (amount && !isNaN(amount) && isFinite(parseFloat(amount))) {
+                let raw = parseFloat(amount);
                 if (checkbox.is(':checked')) {
-                    amount = amount + '000';
+                    // "K" = nghìn: NHÂN 1000, không nối chuỗi (nối chuỗi làm
+                    // "1.5" thành "1.5000" = 1.5 thay vì 1500)
+                    raw *= 1000;
                 }
-                const raw = parseFloat(amount);
                 let text = escapeHtml(formatAmountWithCurrency(raw, currency));
                 if (currency !== 'VND') {
                     const rate = getRateToVND(currency);
@@ -1264,6 +1295,8 @@
         function createNewEvent() {
             localStorage.removeItem('currentEventCode');
             currentEventCode = null;
+            lastKnownUpdatedAt = null;
+            allowEdit = true; // sự kiện mới do chính mình tạo
             $('#eventTitle').text('Sự Kiện Mới');
             $('#eventCodeDisplay').text('');
             members = [];
@@ -1335,12 +1368,20 @@
         }
         // ===== Hết phần khóa chỉnh sửa =====
 
-        // Hàm lưu dữ liệu vào server
+        // ===== Lưu dữ liệu lên server =====
+        // Các lần lưu được TUẦN TỰ HÓA: chỉ 1 request tại một thời điểm, các
+        // thao tác trong lúc chờ được gộp thành đúng 1 lần lưu tiếp theo.
+        // Nhờ vậy không bắn PUT dồn dập và expectedUpdatedAt luôn mới.
         function saveEvent(showAlert = true) {
             if (!allowEdit) return; // Không cho phép lưu nếu ở chế độ chỉ xem
-            
+
             if (members.length === 0 && showAlert) {
                 showToast('Vui lòng thêm ít nhất một thành viên trước khi lưu!', 'warning');
+                return;
+            }
+
+            if (saveInFlight) {
+                savePendingAgain = true;
                 return;
             }
 
@@ -1353,8 +1394,19 @@
                 rates: rates
             };
 
+            function finishSave() {
+                saveInFlight = false;
+                if (savePendingAgain) {
+                    savePendingAgain = false;
+                    saveEvent(false);
+                }
+            }
+
+            saveInFlight = true;
+
             if (currentEventCode) {
                 // Cập nhật sự kiện hiện có
+                eventData.expectedUpdatedAt = lastKnownUpdatedAt;
                 $.ajax({
                     url: `/api/events/${currentEventCode}`,
                     method: 'PUT',
@@ -1362,8 +1414,13 @@
                     headers: { 'X-Edit-Key': getOrCreateEditKey(currentEventCode) },
                     data: JSON.stringify(eventData),
                     success: function(response) {
-                        if (response.success && showAlert) {
-                            showToast('Sự kiện đã được cập nhật thành công!', 'success');
+                        if (response.success) {
+                            if (response.updated_at) {
+                                lastKnownUpdatedAt = response.updated_at;
+                            }
+                            if (showAlert) {
+                                showToast('Sự kiện đã được cập nhật thành công!', 'success');
+                            }
                         }
                     },
                     error: function(xhr) {
@@ -1373,10 +1430,17 @@
                             removeEditKey(currentEventCode);
                             allowEdit = false;
                             updateUIForEditMode();
+                        } else if (xhr.status === 409) {
+                            // Người khác vừa lưu bản mới hơn — không ghi đè,
+                            // tải lại dữ liệu mới nhất (thay đổi local vừa rồi bị bỏ)
+                            savePendingAgain = false;
+                            showToast('Sự kiện vừa được cập nhật ở nơi khác — đang tải lại dữ liệu mới nhất. Thao tác vừa rồi chưa được lưu, vui lòng thực hiện lại.', 'warning');
+                            loadEventFromServer(currentEventCode);
                         } else {
                             showToast('Lỗi khi cập nhật sự kiện!', 'error');
                         }
-                    }
+                    },
+                    complete: finishSave
                 });
             } else {
                 // Tạo sự kiện mới
@@ -1394,6 +1458,7 @@
                             if (response.edit_key) {
                                 setEditKey(currentEventCode, response.edit_key);
                             }
+                            lastKnownUpdatedAt = response.updated_at || null;
                             if (showAlert) {
                                 showToast('Sự kiện đã được tạo thành công và thêm vào danh sách của bạn!', 'success');
                             }
@@ -1401,7 +1466,8 @@
                     },
                     error: function() {
                         showToast('Lỗi khi tạo sự kiện!', 'error');
-                    }
+                    },
+                    complete: finishSave
                 });
             }
         }
@@ -1432,6 +1498,9 @@
                                 showToast('Khóa chỉnh sửa không đúng — đang mở ở chế độ chỉ xem.', 'warning');
                             }
                         }
+
+                        // Mốc updated_at cho optimistic locking khi lưu
+                        lastKnownUpdatedAt = eventData.updated_at || null;
 
                         // Cập nhật tên sự kiện
                         $('#eventTitle').text(eventData.title);
@@ -1566,7 +1635,8 @@
                 if (q && !normalizeViet(exp.title).includes(q)) return false;
                 if (payer && exp.payer !== payer) return false;
                 if (benef) {
-                    const isAll = exp.benefitType === 'all';
+                    // Đồng bộ với getExpenseBeneficiaries: không phải 'selected' = cho tất cả
+                    const isAll = exp.benefitType !== 'selected';
                     const inList = (exp.beneficiaries || []).includes(benef);
                     if (!isAll && !inList) return false;
                 }
@@ -2378,13 +2448,17 @@
 
             // Cộng tiền đã chi cho người thanh toán (đã quy đổi về VND)
             expenses.forEach(expense => {
-                balances[expense.payer] += amountInVND(expense) || 0;
+                // Guard: payer không còn trong danh sách (dữ liệu chia sẻ/bất thường)
+                // thì bỏ qua thay vì tạo NaN lan ra toàn bộ kết quả
+                if (balances[expense.payer] !== undefined) {
+                    balances[expense.payer] += amountInVND(expense) || 0;
+                }
             });
 
             // Tính tiền mỗi người phải trả dựa trên số người hưởng lợi (VND)
             expenses.forEach(expense => {
                 const amountVnd = amountInVND(expense) || 0;
-                const beneficiaries = expense.beneficiaries || members;
+                const beneficiaries = getExpenseBeneficiaries(expense);
                 const amountPerPerson = amountVnd / beneficiaries.length;
 
                 beneficiaries.forEach(member => {
@@ -2421,7 +2495,7 @@
 
                 // Số tiền cần trả (dựa trên các chi phí mà thành viên này được hưởng lợi, VND)
                 const needToPay = expenses.reduce((sum, expense) => {
-                    const beneficiaries = expense.beneficiaries || members;
+                    const beneficiaries = getExpenseBeneficiaries(expense);
                     if (beneficiaries.includes(member)) {
                         return sum + ((amountInVND(expense) || 0) / beneficiaries.length);
                     }
@@ -2527,9 +2601,8 @@
 
             // Hiển thị kết quả
             $('#resultContainer').show();
-
-            // Tự động lưu sau khi tính toán
-            saveEvent(false);
+            // Lưu ý: KHÔNG saveEvent() ở đây — các thao tác thay đổi dữ liệu
+            // đã tự lưu; gọi thêm ở đây gây double-PUT cho mỗi thao tác.
         }
 
         function renderBeneficiaries() {
@@ -2608,8 +2681,10 @@
             // Kiểm tra xem thành viên có chi phí nào không
             const hasExpenses = expenses.some(expense => expense.payer === memberToRemove);
 
-            // Kiểm tra nếu thành viên là beneficiaries của bất kỳ khoản chi phí nào
-            const isBeneficiary = expenses.some(expense => expense.beneficiaries && expense.beneficiaries.includes(memberToRemove));
+            // Chỉ chặn nếu là người hưởng ĐÍCH DANH ('selected'); các khoản
+            // "cho tất cả" tự chia lại theo danh sách thành viên hiện tại
+            const isBeneficiary = expenses.some(expense => expense.benefitType === 'selected'
+                && expense.beneficiaries && expense.beneficiaries.includes(memberToRemove));
 
             if (hasExpenses || isBeneficiary) {
                 showToast('Không thể xóa thành viên này vì họ đã có chi phí trong danh sách. Vui lòng xóa chi phí trước!', 'error');
@@ -2639,7 +2714,7 @@
             if (!allowEdit) return; // Không cho phép thêm nếu ở chế độ chỉ xem
             
             const title = $('#expenseTitle').val().trim();
-            let amount = $('#expenseAmount').val().trim();
+            const amountStr = $('#expenseAmount').val().trim();
             const payer = $('#expensePayer').val();
             const benefitType = $('#benefitType').val();
 
@@ -2648,15 +2723,16 @@
                 return;
             }
 
-            // Xử lý số tiền dựa trên checkbox
-            if ($('#addZerosCheckbox').is(':checked')) {
-                // Nếu checkbox được tick, thêm 3 số 0 vào cuối
-                amount = amount + '000';
-            }
-
-            if (!amount || isNaN(amount) || parseFloat(amount) <= 0) {
+            let amount = parseFloat(amountStr);
+            if (!amountStr || isNaN(amount) || !isFinite(amount) || amount <= 0) {
                 showToast('Vui lòng nhập số tiền hợp lệ!', 'warning');
                 return;
+            }
+
+            // Checkbox "K" = nghìn: NHÂN 1000, không nối chuỗi (nối chuỗi làm
+            // "1.5" thành "1.5000" = 1.5 thay vì 1500)
+            if ($('#addZerosCheckbox').is(':checked')) {
+                amount = amount * 1000;
             }
 
             if (!payer) {
@@ -2695,7 +2771,7 @@
 
             const expenseData = {
                 title: title,
-                amount: parseFloat(amount),
+                amount: amount,
                 currency: currency,
                 payer: payer,
                 benefitType: benefitType,

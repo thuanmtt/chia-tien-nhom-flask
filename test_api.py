@@ -146,17 +146,40 @@ def test_update_event(event_code, edit_key):
         headers={'Content-Type': 'application/json', 'X-Edit-Key': edit_key}
     )
 
-    if response.status_code == 200:
-        data = response.json()
-        if data.get('success'):
-            print(f"✅ Update event OK")
-            return True
-        else:
-            print(f"❌ Update event failed - {data.get('error')}")
-            return False
-    else:
+    if response.status_code != 200 or not response.json().get('success'):
         print(f"❌ Update event failed - Status: {response.status_code}")
         return False
+    if not response.json().get('updated_at'):
+        print("❌ Update response thiếu updated_at")
+        return False
+    print(f"✅ Update event OK")
+
+    # Optimistic locking: expectedUpdatedAt cũ phải bị từ chối 409
+    stale = dict(event_data)
+    stale['expectedUpdatedAt'] = '1999-01-01T00:00:00'
+    r = requests.put(
+        f"{BASE_URL}/api/events/{event_code}",
+        json=stale,
+        headers={'Content-Type': 'application/json', 'X-Edit-Key': edit_key}
+    )
+    if r.status_code != 409:
+        print(f"❌ PUT với expectedUpdatedAt cũ phải trả 409, nhận {r.status_code}")
+        return False
+    print("✅ Optimistic locking: 409 khi expectedUpdatedAt đã cũ")
+
+    # expectedUpdatedAt đúng (vừa nhận từ lần update trước) phải được chấp nhận
+    fresh = dict(event_data)
+    fresh['expectedUpdatedAt'] = response.json()['updated_at']
+    r = requests.put(
+        f"{BASE_URL}/api/events/{event_code}",
+        json=fresh,
+        headers={'Content-Type': 'application/json', 'X-Edit-Key': edit_key}
+    )
+    if r.status_code != 200:
+        print(f"❌ PUT với expectedUpdatedAt hiện tại phải 200, nhận {r.status_code}")
+        return False
+    print("✅ Optimistic locking: 200 khi expectedUpdatedAt khớp")
+    return True
 
 def test_delete_event(event_code, edit_key):
     """Test xóa sự kiện"""

@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import Flask, render_template, request, jsonify, redirect, send_from_directory
 from flask_limiter import Limiter
 import hmac
 import psycopg2
@@ -9,6 +9,7 @@ import secrets
 import string
 from datetime import datetime
 import uuid
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from werkzeug.exceptions import HTTPException
@@ -69,24 +70,25 @@ def _provided_edit_key():
 
 
 def _check_edit_permission(cursor, event_code):
-    """Kiểm tra quyền sửa/xóa event. Trả về 'not_found' | 'forbidden' | 'ok'.
+    """Kiểm tra quyền sửa/xóa event.
 
+    Trả về ('not_found' | 'forbidden' | 'ok', updated_at hiện tại của event).
     Event cũ chưa có edit_key: chấp nhận request và "nhận" key client gửi lên
     (nếu có) làm key chính thức, để dữ liệu cũ không bị khóa ngoài ý muốn.
     """
-    cursor.execute('SELECT edit_key FROM events WHERE event_code = %s', (event_code,))
+    cursor.execute('SELECT edit_key, updated_at FROM events WHERE event_code = %s', (event_code,))
     row = cursor.fetchone()
     if row is None:
-        return 'not_found'
-    stored = row[0]
+        return 'not_found', None
+    stored, updated_at = row[0], row[1]
     provided = _provided_edit_key()
     if stored:
         if not provided or not hmac.compare_digest(stored, provided):
-            return 'forbidden'
-        return 'ok'
+            return 'forbidden', updated_at
+        return 'ok', updated_at
     if provided:
         cursor.execute('UPDATE events SET edit_key = %s WHERE event_code = %s', (provided, event_code))
-    return 'ok'
+    return 'ok', updated_at
 
 
 def _database_url():
@@ -166,6 +168,7 @@ def create_event():
             '''
             INSERT INTO events (id, event_code, title, members, expenses, bank_info, couples, rates, edit_key)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING updated_at
             ''',
             (
                 event_id,
@@ -179,9 +182,17 @@ def create_event():
                 edit_key,
             ),
         )
+        new_row = cursor.fetchone()
         cursor.close()
+        created_updated_at = new_row[0].isoformat() if new_row and new_row[0] else None
 
-        return jsonify({'success': True, 'event_id': event_id, 'event_code': event_code, 'edit_key': edit_key})
+        return jsonify({
+            'success': True,
+            'event_id': event_id,
+            'event_code': event_code,
+            'edit_key': edit_key,
+            'updated_at': created_updated_at,
+        })
     except HTTPException:
         # Để Flask xử lý (ví dụ 413 khi payload quá lớn)
         raise
@@ -235,15 +246,19 @@ def get_event(event_code):
 @limiter.limit('60 per minute; 1000 per day')
 def update_event(event_code):
     try:
+        raw = request.get_json(silent=True)
         try:
-            data = validate_event_payload(request.get_json(silent=True))
+            data = validate_event_payload(raw)
         except ValidationError as e:
             return jsonify({'success': False, 'error': str(e)}), 400
+        # Optimistic locking: client gửi updated_at nó biết; nếu server đã có
+        # bản mới hơn (người khác vừa lưu) thì từ chối để không ghi đè âm thầm.
+        expected_updated_at = raw.get('expectedUpdatedAt') if isinstance(raw, dict) else None
 
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        permission = _check_edit_permission(cursor, event_code)
+        permission, current_updated_at = _check_edit_permission(cursor, event_code)
         if permission == 'not_found':
             cursor.close()
             return jsonify({'success': False, 'error': 'Event not found'}), 404
@@ -251,11 +266,21 @@ def update_event(event_code):
             cursor.close()
             return jsonify({'success': False, 'error': 'Bạn không có quyền chỉnh sửa sự kiện này.'}), 403
 
+        if (expected_updated_at and current_updated_at
+                and current_updated_at.isoformat() != expected_updated_at):
+            cursor.close()
+            return jsonify({
+                'success': False,
+                'conflict': True,
+                'error': 'Sự kiện đã được cập nhật ở nơi khác.',
+            }), 409
+
         cursor.execute(
             '''
             UPDATE events
             SET title = %s, members = %s, expenses = %s, bank_info = %s, couples = %s, rates = %s, updated_at = CURRENT_TIMESTAMP
             WHERE event_code = %s
+            RETURNING updated_at
             ''',
             (
                 data['title'],
@@ -267,8 +292,10 @@ def update_event(event_code):
                 event_code,
             ),
         )
+        new_row = cursor.fetchone()
         cursor.close()
-        return jsonify({'success': True})
+        new_updated_at = new_row[0].isoformat() if new_row and new_row[0] else None
+        return jsonify({'success': True, 'updated_at': new_updated_at})
     except HTTPException:
         raise
     except Exception as e:
@@ -444,7 +471,7 @@ def delete_event(event_code):
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        permission = _check_edit_permission(cursor, event_code)
+        permission, _unused = _check_edit_permission(cursor, event_code)
         if permission == 'not_found':
             cursor.close()
             return jsonify({'success': False, 'error': 'Event not found'}), 404
@@ -459,14 +486,16 @@ def delete_event(event_code):
         return _server_error(e)
 
 
+# Hai route cũ chỉ redirect về URL chuẩn /?event_code=X — template không dùng
+# Jinja nên render với params là vô nghĩa; quyền sửa/xem do can_edit quyết định.
 @app.route('/event/<event_code>')
 def view_event(event_code):
-    return render_template('index.html', event_code=event_code)
+    return redirect(f'/?event_code={quote(event_code)}')
 
 
 @app.route('/share/<event_code>')
 def share_event(event_code):
-    return render_template('index.html', event_code=event_code, allow_edit=False)
+    return redirect(f'/?event_code={quote(event_code)}')
 
 
 if __name__ == '__main__':
