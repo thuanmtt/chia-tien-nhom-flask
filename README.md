@@ -58,13 +58,23 @@ chia-tien-nhom-flask/
 ## API Endpoints
 
 ### Events
-- `POST /api/events` - Tạo sự kiện mới
-- `GET /api/events/<event_code>` - Lấy thông tin sự kiện
-- `PUT /api/events/<event_code>` - Cập nhật sự kiện
-- `DELETE /api/events/<event_code>` - Xóa sự kiện
+- `POST /api/events` - Tạo sự kiện mới (response chứa `edit_key` — chỉ trả về 1 lần duy nhất)
+- `GET /api/events/<event_code>` - Lấy thông tin sự kiện (không bao giờ trả `edit_key`)
+- `PUT /api/events/<event_code>` - Cập nhật sự kiện (yêu cầu header `X-Edit-Key`)
+- `DELETE /api/events/<event_code>` - Xóa sự kiện (yêu cầu header `X-Edit-Key`)
+
+Sự kiện tạo trước khi có cơ chế `edit_key` (cột NULL trong DB) sẽ được "nhận" key
+từ lần ghi hợp lệ đầu tiên có gửi `X-Edit-Key`; từ đó về sau key này là bắt buộc.
 
 ### Banks
 - `GET /api/banks` - Lấy danh sách ngân hàng
+
+## Biến môi trường
+
+- `DATABASE_URL` / `POSTGRES_URL` - Kết nối Postgres (bản deploy Vercel, `vercel_app.py`)
+- `RATELIMIT_STORAGE_URI` - Storage cho rate limiter (mặc định `memory://`).
+  Trên serverless (Vercel), `memory://` gần như vô hiệu vì mỗi instance có bộ nhớ
+  riêng — nên trỏ tới Redis, ví dụ Upstash: `redis://default:<password>@<host>:<port>`
 
 ## Cách sử dụng
 

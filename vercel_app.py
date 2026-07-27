@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from flask_limiter import Limiter
+import hmac
 import psycopg2
 import psycopg2.extras
 import os
@@ -10,6 +11,9 @@ from datetime import datetime
 import uuid
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
+from werkzeug.exceptions import HTTPException
+
+from validation import ValidationError, validate_event_payload
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -18,6 +22,8 @@ app = Flask(
     template_folder=os.path.join(BASE_DIR, 'templates'),
     static_folder=os.path.join(BASE_DIR, 'static'),
 )
+# Chặn payload quá lớn (event bình thường chỉ vài chục KB)
+app.config['MAX_CONTENT_LENGTH'] = 512 * 1024
 
 
 def _client_ip():
@@ -31,7 +37,9 @@ limiter = Limiter(
     key_func=_client_ip,
     app=app,
     default_limits=['200 per minute', '2000 per day'],
-    storage_uri='memory://',
+    # Trên Vercel serverless, memory:// gần như vô hiệu (mỗi instance một bộ nhớ).
+    # Đặt RATELIMIT_STORAGE_URI=redis://... (ví dụ Upstash) để limit có tác dụng thật.
+    storage_uri=os.environ.get('RATELIMIT_STORAGE_URI', 'memory://'),
     headers_enabled=True,
 )
 
@@ -43,6 +51,42 @@ def _ratelimit_handler(e):
         'error': 'Quá nhiều yêu cầu, vui lòng thử lại sau.',
         'detail': str(e.description),
     }), 429
+
+
+@app.errorhandler(413)
+def _too_large_handler(e):
+    return jsonify({'success': False, 'error': 'Dữ liệu gửi lên quá lớn.'}), 413
+
+
+def _server_error(exc):
+    """Log chi tiết ở server, trả lỗi chung chung cho client."""
+    app.logger.exception(exc)
+    return jsonify({'success': False, 'error': 'Đã xảy ra lỗi máy chủ.'}), 500
+
+
+def _provided_edit_key():
+    return request.headers.get('X-Edit-Key', '').strip()
+
+
+def _check_edit_permission(cursor, event_code):
+    """Kiểm tra quyền sửa/xóa event. Trả về 'not_found' | 'forbidden' | 'ok'.
+
+    Event cũ chưa có edit_key: chấp nhận request và "nhận" key client gửi lên
+    (nếu có) làm key chính thức, để dữ liệu cũ không bị khóa ngoài ý muốn.
+    """
+    cursor.execute('SELECT edit_key FROM events WHERE event_code = %s', (event_code,))
+    row = cursor.fetchone()
+    if row is None:
+        return 'not_found'
+    stored = row[0]
+    provided = _provided_edit_key()
+    if stored:
+        if not provided or not hmac.compare_digest(stored, provided):
+            return 'forbidden'
+        return 'ok'
+    if provided:
+        cursor.execute('UPDATE events SET edit_key = %s WHERE event_code = %s', (provided, event_code))
+    return 'ok'
 
 
 def _database_url():
@@ -106,33 +150,43 @@ def manifest():
 @limiter.limit('10 per minute; 100 per day')
 def create_event():
     try:
-        data = request.get_json()
+        try:
+            data = validate_event_payload(request.get_json(silent=True))
+        except ValidationError as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+
         event_code = generate_event_code()
         event_id = str(uuid.uuid4())
+        # Khóa chỉnh sửa — chỉ trả về 1 lần khi tạo
+        edit_key = secrets.token_urlsafe(24)
 
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
             '''
-            INSERT INTO events (id, event_code, title, members, expenses, bank_info, couples, rates)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO events (id, event_code, title, members, expenses, bank_info, couples, rates, edit_key)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ''',
             (
                 event_id,
                 event_code,
-                data.get('title', 'Sự Kiện Mới'),
-                json.dumps(data.get('members', [])),
-                json.dumps(data.get('expenses', [])),
-                json.dumps(data.get('bankInfo', {})),
-                json.dumps(data.get('couples', [])),
-                json.dumps(data.get('rates', {})),
+                data['title'],
+                json.dumps(data['members']),
+                json.dumps(data['expenses']),
+                json.dumps(data['bankInfo']),
+                json.dumps(data['couples']),
+                json.dumps(data['rates']),
+                edit_key,
             ),
         )
         cursor.close()
 
-        return jsonify({'success': True, 'event_id': event_id, 'event_code': event_code})
+        return jsonify({'success': True, 'event_id': event_id, 'event_code': event_code, 'edit_key': edit_key})
+    except HTTPException:
+        # Để Flask xử lý (ví dụ 413 khi payload quá lớn)
+        raise
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return _server_error(e)
 
 
 @app.route('/api/events/<event_code>', methods=['GET'])
@@ -159,22 +213,37 @@ def get_event(event_code):
                     'bankInfo': json.loads(event['bank_info']) if event['bank_info'] else {},
                     'couples': json.loads(couples_raw) if couples_raw else [],
                     'rates': json.loads(rates_raw) if rates_raw else {},
+                    # Lưu ý: tuyệt đối không trả edit_key ở đây — link chỉ-xem
+                    # cũng gọi API này.
                     'created_at': event['created_at'].isoformat() if event['created_at'] else None,
                     'updated_at': event['updated_at'].isoformat() if event['updated_at'] else None,
                 },
             })
         return jsonify({'success': False, 'error': 'Event not found'}), 404
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return _server_error(e)
 
 
 @app.route('/api/events/<event_code>', methods=['PUT'])
 @limiter.limit('60 per minute; 1000 per day')
 def update_event(event_code):
     try:
-        data = request.get_json()
+        try:
+            data = validate_event_payload(request.get_json(silent=True))
+        except ValidationError as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+
         conn = get_db_connection()
         cursor = conn.cursor()
+
+        permission = _check_edit_permission(cursor, event_code)
+        if permission == 'not_found':
+            cursor.close()
+            return jsonify({'success': False, 'error': 'Event not found'}), 404
+        if permission == 'forbidden':
+            cursor.close()
+            return jsonify({'success': False, 'error': 'Bạn không có quyền chỉnh sửa sự kiện này.'}), 403
+
         cursor.execute(
             '''
             UPDATE events
@@ -182,22 +251,21 @@ def update_event(event_code):
             WHERE event_code = %s
             ''',
             (
-                data.get('title', 'Sự Kiện Mới'),
-                json.dumps(data.get('members', [])),
-                json.dumps(data.get('expenses', [])),
-                json.dumps(data.get('bankInfo', {})),
-                json.dumps(data.get('couples', [])),
-                json.dumps(data.get('rates', {})),
+                data['title'],
+                json.dumps(data['members']),
+                json.dumps(data['expenses']),
+                json.dumps(data['bankInfo']),
+                json.dumps(data['couples']),
+                json.dumps(data['rates']),
                 event_code,
             ),
         )
-        if cursor.rowcount == 0:
-            cursor.close()
-            return jsonify({'success': False, 'error': 'Event not found'}), 404
         cursor.close()
         return jsonify({'success': True})
+    except HTTPException:
+        raise
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return _server_error(e)
 
 
 CURRENCY_NAME_VI = {
@@ -347,7 +415,7 @@ def get_exchange_rates():
     except (HTTPError, URLError) as e:
         return jsonify({'success': False, 'error': f'Không kết nối được Vietcombank: {e}'}), 502
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return _server_error(e)
 
 
 @app.route('/api/banks')
@@ -359,7 +427,7 @@ def get_banks():
             banks_data = json.load(f)
         return jsonify(banks_data)
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return _server_error(e)
 
 
 @app.route('/api/events/<event_code>', methods=['DELETE'])
@@ -368,14 +436,20 @@ def delete_event(event_code):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('DELETE FROM events WHERE event_code = %s', (event_code,))
-        if cursor.rowcount == 0:
+
+        permission = _check_edit_permission(cursor, event_code)
+        if permission == 'not_found':
             cursor.close()
             return jsonify({'success': False, 'error': 'Event not found'}), 404
+        if permission == 'forbidden':
+            cursor.close()
+            return jsonify({'success': False, 'error': 'Bạn không có quyền xóa sự kiện này.'}), 403
+
+        cursor.execute('DELETE FROM events WHERE event_code = %s', (event_code,))
         cursor.close()
         return jsonify({'success': True})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return _server_error(e)
 
 
 @app.route('/event/<event_code>')

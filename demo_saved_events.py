@@ -121,7 +121,8 @@ def create_multiple_events():
                 event_code = data.get('event_code')
                 created_events.append({
                     'title': event_data['title'],
-                    'event_code': event_code
+                    'event_code': event_code,
+                    'edit_key': data.get('edit_key')
                 })
                 print(f"   ✅ Thành công - Event code: {event_code}")
             else:
@@ -131,11 +132,12 @@ def create_multiple_events():
     
     return created_events
 
-def test_delete_event(event_code):
+def test_delete_event(event_code, edit_key=None):
     """Test xóa một sự kiện"""
     print(f"🗑️  Xóa sự kiện {event_code}...")
-    
-    response = requests.delete(f"{BASE_URL}/api/events/{event_code}")
+
+    headers = {'X-Edit-Key': edit_key} if edit_key else {}
+    response = requests.delete(f"{BASE_URL}/api/events/{event_code}", headers=headers)
     
     if response.status_code == 200:
         data = response.json()
@@ -163,7 +165,7 @@ def main():
 
     # Test xóa sự kiện đầu tiên
     first_event = created_events[0]
-    if test_delete_event(first_event['event_code']):
+    if test_delete_event(first_event['event_code'], first_event.get('edit_key')):
         print(f"✅ Đã xóa sự kiện: {first_event['title']}")
 
     print(f"\n🎯 Demo hoàn thành!")

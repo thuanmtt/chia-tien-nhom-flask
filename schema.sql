@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS events (
     bank_info TEXT,
     couples TEXT NOT NULL DEFAULT '[]',
     rates TEXT NOT NULL DEFAULT '{}',
+    edit_key TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -18,3 +19,4 @@ CREATE INDEX IF NOT EXISTS idx_events_updated_at ON events (updated_at DESC);
 -- Migration an toàn cho DB đã deploy (chạy lại nhiều lần không sao):
 ALTER TABLE events ADD COLUMN IF NOT EXISTS couples TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE events ADD COLUMN IF NOT EXISTS rates TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE events ADD COLUMN IF NOT EXISTS edit_key TEXT;

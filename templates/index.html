@@ -5,8 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Ứng dụng chia tiền nhóm online nhanh chóng và tiện lợi dành cho bạn.">
     <title>Ứng Dụng Chia Tiền Nhóm Online - Tính Toán & Chia Sẻ Dễ Dàng</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
+          integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+          integrity="sha384-3B6NwesSXE7YJlcLI9RpRqGf2p/EgVH8BgoKTaUrmKNDkHPStTQ3EyoYjCGXaOTS" crossorigin="anonymous">
     <link rel="icon" type="image/x-icon" href="/static/icons/favicon.ico">
     <link rel="icon" type="image/svg+xml" href="/static/icons/icon.svg">
     <link rel="icon" type="image/png" sizes="96x96" href="/static/icons/favicon-96x96.png">
@@ -22,7 +24,6 @@
     <meta name="apple-mobile-web-app-title" content="Chia Tiền">
     <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js"></script>
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-85JFS83FXC"></script>
     <script>
@@ -202,7 +203,8 @@
         }
     }
     </style>
-    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet"
+          integrity="sha384-OXVF05DQEe311p6ohU11NwlnX08FzMCsyoXzGOaL+83dKAb3qS17yZJxESl8YrJQ" crossorigin="anonymous" />
 </head>
 <body>
 <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
@@ -756,13 +758,20 @@
     </div>
 </footer>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"
+        integrity="sha384-vtXRMe3mGCbOeY7l30aIg8H9p3GdeSe4IFlP6G8JMa7o7lXvnz3GFKzPxzJdPfGK" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"
+        integrity="sha384-d3UHjPdzJkZuk5H3qKYMLRyWLAQBJbby2yr2Q58hXXtAGF8RSNO9jpLDlKKPv5v3" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"
+        integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"
+        integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"
+        integrity="sha384-en/ztfPSRkGfME4KIm05joYXynqzUgbsG5nMrj/xEFAHXkeZfO3yMK8QQ+mP7p1/" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"
+        integrity="sha384-Xl/CUCfJbzsngMp0CFxkmF0VW/8C160IsGujqeQlIhaGxKz2+JsIGORFqtCPeldF" crossorigin="anonymous"></script>
 <script>
     $(document).ready(function () {
         let currentEventCode = localStorage.getItem('currentEventCode') || null;
@@ -784,7 +793,7 @@
             if (!entry) return '<span class="badge bg-warning text-dark">Chưa có</span>';
             if (API_SOURCES.has(entry.source)) {
                 const label = SOURCE_BADGE_SHORT[entry.source] || 'API';
-                const dateStr = entry.rateDate ? ` (${entry.rateDate})` : '';
+                const dateStr = entry.rateDate ? ` (${escapeHtml(entry.rateDate)})` : '';
                 return `<span class="badge bg-primary">${label}${dateStr}</span>`;
             }
             if (entry.source === 'custom') return '<span class="badge bg-secondary">Tùy chỉnh</span>';
@@ -795,6 +804,14 @@
         let allowEdit = true; // Mặc định cho phép sửa
         const EXPENSE_PAGE_SIZE = 10;
         let expenseDisplayLimit = EXPENSE_PAGE_SIZE;
+
+        // Escape HTML để chống XSS khi render dữ liệu người dùng
+        // (tên thành viên, tiêu đề chi phí, tên sự kiện, tên nhóm...)
+        function escapeHtml(value) {
+            return String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[ch]));
+        }
 
         // Danh sách tiền tệ thông dụng cho dropdown
         const COMMON_CURRENCIES = [
@@ -886,7 +903,7 @@
             Array.from(extras).sort().forEach(code => { if (!seen.has(code)) { seen.add(code); codes.push(code); } });
             codes.forEach(code => {
                 const name = CURRENCY_NAME[code] || (rates[code] && rates[code].currencyName) || '';
-                $sel.append(`<option value="${code}">${code}${name ? ' - ' + name : ''}</option>`);
+                $sel.append($('<option>').val(code).text(code + (name ? ' - ' + name : '')));
             });
             $sel.val(codes.includes(current) ? current : 'VND');
         }
@@ -914,6 +931,7 @@
         const urlParams = new URLSearchParams(window.location.search);
         const urlEventCode = urlParams.get('event_code');
         const urlAllowEdit = urlParams.get('allow_edit');
+        const urlEditKey = urlParams.get('key');
         
         // Kiểm tra route share (chỉ xem)
         if (window.location.pathname.startsWith('/share/')) {
@@ -927,8 +945,11 @@
                 loadEventFromServer(currentEventCode);
             }
         } else if (urlEventCode) {
-            // Kiểm tra params allow_edit
-            if (urlAllowEdit === 'true') {
+            // Link chỉnh sửa mới kèm khóa: lưu khóa để các request PUT/DELETE dùng
+            if (urlEditKey) {
+                setEditKey(urlEventCode, urlEditKey);
+                allowEdit = true;
+            } else if (urlAllowEdit === 'true') {
                 allowEdit = true;
             } else if (urlAllowEdit === 'false') {
                 allowEdit = false;
@@ -1034,7 +1055,7 @@
             $('#bankInfoMember').empty();
             $('#bankInfoMember').append('<option value="" selected disabled>Chọn thành viên...</option>');
             members.forEach(member => {
-                $('#bankInfoMember').append(`<option value="${member}">${member}</option>`);
+                $('#bankInfoMember').append($('<option>').val(member).text(member));
             });
         }
 
@@ -1050,15 +1071,15 @@
 
                 $('#bankInfoTableBody').append(`
                     <tr>
-                        <td>${member}</td>
-                        <td>${bankLogo}${bankName}</td>
-                        <td>${info.account || ''}</td>
+                        <td>${escapeHtml(member)}</td>
+                        <td>${bankLogo}${escapeHtml(bankName)}</td>
+                        <td>${escapeHtml(info.account || '')}</td>
                         <td>
-                            <button class="btn btn-sm btn-outline-primary edit-bank-info" data-member="${member}">
+                            <button class="btn btn-sm btn-outline-primary edit-bank-info" data-member="${escapeHtml(member)}">
                                 <i class="fas fa-edit"></i>
                             </button>
                             ${info.bank ? `
-                                <button class="btn btn-sm btn-outline-danger delete-bank-info" data-member="${member}">
+                                <button class="btn btn-sm btn-outline-danger delete-bank-info" data-member="${escapeHtml(member)}">
                                     <i class="fas fa-trash"></i>
                                 </button>
                             ` : ''}
@@ -1213,7 +1234,7 @@
                     amount = amount + '000';
                 }
                 const raw = parseFloat(amount);
-                let text = formatAmountWithCurrency(raw, currency);
+                let text = escapeHtml(formatAmountWithCurrency(raw, currency));
                 if (currency !== 'VND') {
                     const rate = getRateToVND(currency);
                     if (rate !== null) {
@@ -1270,6 +1291,50 @@
             updateUIForEditMode();
         }
 
+        // ===== Khóa chỉnh sửa (edit key) =====
+        // Server chỉ chấp nhận PUT/DELETE khi X-Edit-Key khớp với khóa của sự kiện.
+        function getEditKeyMap() {
+            try {
+                const map = JSON.parse(localStorage.getItem('eventEditKeys') || '{}');
+                return (map && typeof map === 'object') ? map : {};
+            } catch (e) {
+                return {};
+            }
+        }
+
+        function getEditKey(eventCode) {
+            return getEditKeyMap()[eventCode] || null;
+        }
+
+        function setEditKey(eventCode, key) {
+            if (!eventCode || !key) return;
+            const map = getEditKeyMap();
+            map[eventCode] = key;
+            localStorage.setItem('eventEditKeys', JSON.stringify(map));
+        }
+
+        // Sự kiện cũ (tạo trước khi có edit key): tự sinh khóa gửi lên,
+        // server sẽ "nhận" khóa này cho sự kiện chưa có khóa.
+        function getOrCreateEditKey(eventCode) {
+            let key = getEditKey(eventCode);
+            if (!key) {
+                key = (window.crypto && crypto.randomUUID)
+                    ? crypto.randomUUID()
+                    : 'k-' + Date.now().toString(36) + Math.random().toString(36).slice(2);
+                setEditKey(eventCode, key);
+            }
+            return key;
+        }
+
+        function buildShareLinks(eventCode) {
+            const viewOnly = window.location.origin + '/share/' + encodeURIComponent(eventCode);
+            const key = getEditKey(eventCode);
+            let editable = window.location.origin + '/?event_code=' + encodeURIComponent(eventCode);
+            editable += key ? ('&key=' + encodeURIComponent(key)) : '&allow_edit=true';
+            return { viewOnly, editable };
+        }
+        // ===== Hết phần khóa chỉnh sửa =====
+
         // Hàm lưu dữ liệu vào server
         function saveEvent(showAlert = true) {
             if (!allowEdit) return; // Không cho phép lưu nếu ở chế độ chỉ xem
@@ -1294,14 +1359,19 @@
                     url: `/api/events/${currentEventCode}`,
                     method: 'PUT',
                     contentType: 'application/json',
+                    headers: { 'X-Edit-Key': getOrCreateEditKey(currentEventCode) },
                     data: JSON.stringify(eventData),
                     success: function(response) {
                         if (response.success && showAlert) {
                             showToast('Sự kiện đã được cập nhật thành công!', 'success');
                         }
                     },
-                    error: function() {
-                        showToast('Lỗi khi cập nhật sự kiện!', 'error');
+                    error: function(xhr) {
+                        if (xhr.status === 403) {
+                            showToast('Bạn không có quyền chỉnh sửa sự kiện này. Hãy dùng link chỉnh sửa mà người tạo chia sẻ.', 'error');
+                        } else {
+                            showToast('Lỗi khi cập nhật sự kiện!', 'error');
+                        }
                     }
                 });
             } else {
@@ -1317,6 +1387,9 @@
                             localStorage.setItem('currentEventCode', currentEventCode);
                             $('#eventCodeDisplay').text(currentEventCode);
                             saveEventCodeToLocalStorage(currentEventCode); // Lưu event_code vào localStorage
+                            if (response.edit_key) {
+                                setEditKey(currentEventCode, response.edit_key);
+                            }
                             if (showAlert) {
                                 showToast('Sự kiện đã được tạo thành công và thêm vào danh sách của bạn!', 'success');
                             }
@@ -1408,19 +1481,19 @@
                 if (couple) {
                     const isPrimary = couple.primary === member;
                     const tooltip = `Nhóm: ${formatCoupleLabel(couple)}${isPrimary ? ' (đại diện)' : ''}`;
-                    badge = `<span class="couple-badge" title="${tooltip}">
+                    badge = `<span class="couple-badge" title="${escapeHtml(tooltip)}">
                         ${isPrimary ? '<span class="primary-dot"></span>' : ''}
-                        <i class="fas fa-heart me-1" style="font-size:0.65rem;"></i>${formatCoupleLabel(couple)}
+                        <i class="fas fa-heart me-1" style="font-size:0.65rem;"></i>${escapeHtml(formatCoupleLabel(couple))}
                     </span>`;
                 }
                 $('#membersList').append(`
                 <div class="member-pill">
-                    ${member}${badge}
+                    ${escapeHtml(member)}${badge}
                     <span class="member-close" data-index="${index}" style="${!allowEdit ? 'display: none;' : ''}"><i class="fas fa-times"></i></span>
                 </div>
             `);
 
-                $('#expensePayer').append(`<option value="${member}">${member}</option>`);
+                $('#expensePayer').append($('<option>').val(member).text(member));
             });
 
             // Đồng bộ tuỳ chọn người trả / người hưởng trong bộ lọc chi phí
@@ -2040,21 +2113,21 @@
                     amountDisplay = formatCurrency(expense.amount);
                 } else {
                     const vnd = amountInVND(expense);
-                    const base = formatAmountWithCurrency(expense.amount, expCurrency);
+                    const base = escapeHtml(formatAmountWithCurrency(expense.amount, expCurrency));
                     amountDisplay = vnd !== null
                         ? `${base} <span class="text-muted small">(≈ ${formatCurrency(vnd)})</span>`
                         : `${base} <span class="text-danger small">(chưa có tỷ giá)</span>`;
                 }
 
                 const expenseDateBadge = expense.expense_date
-                    ? `<span class="badge bg-light text-dark border ms-2" style="font-weight:500;"><i class="fas fa-calendar-day me-1"></i>${formatExpenseDateForDisplay(expense.expense_date)}</span>`
+                    ? `<span class="badge bg-light text-dark border ms-2" style="font-weight:500;"><i class="fas fa-calendar-day me-1"></i>${escapeHtml(formatExpenseDateForDisplay(expense.expense_date))}</span>`
                     : '';
                 const timeInfoParts = [];
                 if (expense.created_time) {
-                    timeInfoParts.push(`<span><i class="fas fa-plus-circle me-1"></i>Tạo: ${formatDateTimeForDisplay(expense.created_time)}</span>`);
+                    timeInfoParts.push(`<span><i class="fas fa-plus-circle me-1"></i>Tạo: ${escapeHtml(formatDateTimeForDisplay(expense.created_time))}</span>`);
                 }
                 if (expense.updated_time && expense.updated_time !== expense.created_time) {
-                    timeInfoParts.push(`<span><i class="fas fa-pen me-1"></i>Cập nhật: ${formatDateTimeForDisplay(expense.updated_time)}</span>`);
+                    timeInfoParts.push(`<span><i class="fas fa-pen me-1"></i>Cập nhật: ${escapeHtml(formatDateTimeForDisplay(expense.updated_time))}</span>`);
                 }
                 const timeInfoDisplay = timeInfoParts.length
                     ? `<div class="mt-1 small text-muted d-flex flex-wrap gap-2">${timeInfoParts.join('')}</div>`
@@ -2066,11 +2139,11 @@
                 <div>
                     <h6 class="mb-1 d-flex align-items-center flex-wrap">
                         <span class="badge bg-secondary me-2">${stt}</span>
-                        <span>${expense.title}</span>
+                        <span>${escapeHtml(expense.title)}</span>
                         ${expenseDateBadge}
                     </h6>
                     <p class="mb-0 text-muted">
-                        <small>${expense.payer} đã thanh toán ${amountDisplay} ${benefitInfo}</small>
+                        <small>${escapeHtml(expense.payer)} đã thanh toán ${amountDisplay} ${escapeHtml(benefitInfo)}</small>
                     </p>
                     ${timeInfoDisplay}
                 </div>
@@ -2217,13 +2290,14 @@
                 const time = new Date(event.updated_at).toLocaleTimeString('vi-VN', {hour: '2-digit', minute: '2-digit'});
                 const { total, missingRates } = computeSavedEventTotal(event);
                 const totalLabel = missingRates.length > 0
-                    ? `${formatCurrency(total)} <span class="text-danger small">(thiếu tỷ giá: ${missingRates.join(', ')})</span>`
+                    ? `${formatCurrency(total)} <span class="text-danger small">(thiếu tỷ giá: ${escapeHtml(missingRates.join(', '))})</span>`
                     : formatCurrency(total);
+                const safeCode = escapeHtml(event.event_code);
 
                 $('#savedEventsList').append(`
-                    <div class="list-group-item list-group-item-action event-item" data-event-code="${event.event_code}">
+                    <div class="list-group-item list-group-item-action event-item" data-event-code="${safeCode}">
                         <div class="d-flex w-100 justify-content-between">
-                            <h5 class="mb-1">${event.title}</h5>
+                            <h5 class="mb-1">${escapeHtml(event.title)}</h5>
                             <small class="text-muted">${date} ${time}</small>
                         </div>
                         <div class="d-flex justify-content-between align-items-center">
@@ -2231,13 +2305,13 @@
                                 <p class="mb-1">Số thành viên: ${event.members ? event.members.length : 0}</p>
                                 <p class="mb-1">Số chi phí: ${event.expenses ? event.expenses.length : 0}</p>
                                 <p class="mb-1">Tổng chi phí: ${totalLabel}</p>
-                                <small class="text-muted">Mã: ${event.event_code}</small>
+                                <small class="text-muted">Mã: ${safeCode}</small>
                             </div>
                             <div>
-                                <button class="btn btn-sm btn-outline-primary me-1 share-event-btn" data-event-code="${event.event_code}">
+                                <button class="btn btn-sm btn-outline-primary me-1 share-event-btn" data-event-code="${safeCode}">
                                     <i class="fas fa-share-alt"></i>
                                 </button>
-                                <button class="btn btn-sm btn-danger delete-event-btn" data-event-code="${event.event_code}">
+                                <button class="btn btn-sm btn-danger delete-event-btn" data-event-code="${safeCode}">
                                     <i class="fas fa-trash"></i>
                                 </button>
                             </div>
@@ -2341,15 +2415,15 @@
                 const couple = coupleByMember[member];
                 const isPrimary = couple && couple.primary === member;
                 const coupleTag = couple
-                    ? `<span class="couple-badge ms-1" title="Nhóm: ${formatCoupleLabel(couple)}">
+                    ? `<span class="couple-badge ms-1" title="Nhóm: ${escapeHtml(formatCoupleLabel(couple))}">
                          ${isPrimary ? '<span class="primary-dot"></span>' : ''}
-                         <i class="fas fa-heart me-1" style="font-size:0.65rem;"></i>${formatCoupleLabel(couple)}
+                         <i class="fas fa-heart me-1" style="font-size:0.65rem;"></i>${escapeHtml(formatCoupleLabel(couple))}
                        </span>`
                     : '';
 
                 let balanceCell;
                 if (couple && !isPrimary) {
-                    balanceCell = `<td class="text-end text-muted small">→ gộp vào ${couple.primary}</td>`;
+                    balanceCell = `<td class="text-end text-muted small">→ gộp vào ${escapeHtml(couple.primary)}</td>`;
                 } else {
                     const b = mergedBalances[member] || 0;
                     balanceCell = `<td class="text-end ${b >= 0 ? 'text-success' : 'text-danger'}">${formatCurrency(b)}</td>`;
@@ -2357,7 +2431,7 @@
 
                 $('#summaryTableBody').append(`
         <tr>
-            <td>${member}${coupleTag}</td>
+            <td>${escapeHtml(member)}${coupleTag}</td>
             <td class="text-end">${formatCurrency(paid)}</td>
             <td class="text-end">${formatCurrency(needToPay)}</td>
             ${balanceCell}
@@ -2419,9 +2493,9 @@
                     $('#transfersList').append(`
             <div class="transfer-item">
                 <i class="fas fa-exchange-alt me-2"></i>
-                <strong>${transfer.from}</strong> chuyển <strong>${formatCurrency(transfer.amount)}</strong> cho <strong>${transfer.to}</strong>
+                <strong>${escapeHtml(transfer.from)}</strong> chuyển <strong>${formatCurrency(transfer.amount)}</strong> cho <strong>${escapeHtml(transfer.to)}</strong>
                 <div class="mt-2">
-                    <button class="btn btn-sm btn-outline-primary generate-qr-btn" data-from="${transfer.from}" data-to="${transfer.to}" data-amount="${transfer.amount}">
+                    <button class="btn btn-sm btn-outline-primary generate-qr-btn" data-from="${escapeHtml(transfer.from)}" data-to="${escapeHtml(transfer.to)}" data-amount="${transfer.amount}">
                         <i class="fas fa-qrcode me-1"></i> Bấm vào đây để tạo QR chuyển tiền
                     </button>
                 </div>
@@ -2768,7 +2842,7 @@
                 const memberOptions = members.map(m => {
                     const checked = selectedMembers.includes(m) ? 'checked' : '';
                     return `<label class="me-2">
-                        <input type="checkbox" class="couple-member-cb" data-ci="${ci}" value="${m}" ${checked}> ${m}
+                        <input type="checkbox" class="couple-member-cb" data-ci="${ci}" value="${escapeHtml(m)}" ${checked}> ${escapeHtml(m)}
                     </label>`;
                 }).join('');
 
@@ -2776,7 +2850,7 @@
                     ? selectedMembers.map(m => {
                         const checked = m === primary ? 'checked' : '';
                         return `<label class="me-2">
-                            <input type="radio" class="couple-primary-rb" name="primary-${ci}" data-ci="${ci}" value="${m}" ${checked}> ${m}
+                            <input type="radio" class="couple-primary-rb" name="primary-${ci}" data-ci="${ci}" value="${escapeHtml(m)}" ${checked}> ${escapeHtml(m)}
                         </label>`;
                     }).join('')
                     : '<span class="text-muted small">Chọn thành viên trước</span>';
@@ -2792,7 +2866,7 @@
                         <div class="mb-2">
                             <label class="form-label small mb-1">Tên nhóm (tùy chọn)</label>
                             <input type="text" class="form-control form-control-sm couple-label-input" data-ci="${ci}"
-                                   value="${(couple.label || '').replace(/"/g, '&quot;')}" placeholder="Ví dụ: Vợ chồng An & Bình">
+                                   value="${escapeHtml(couple.label || '')}" placeholder="Ví dụ: Vợ chồng An & Bình">
                         </div>
                         <div class="mb-2">
                             <div class="small text-muted mb-1">Thành viên trong nhóm:</div>
@@ -2919,17 +2993,18 @@
                 const rateVal = (typeof entry.rate === 'number' && entry.rate > 0) ? entry.rate : '';
                 const name = CURRENCY_NAME[code] || entry.currencyName || '';
                 const sourceBadge = renderSourceBadge(entry);
+                const safeCode = escapeHtml(code);
                 $tb.append(`
-                    <tr data-code="${code}">
-                        <td><strong>${code}</strong></td>
-                        <td class="small text-muted">${name}</td>
+                    <tr data-code="${safeCode}">
+                        <td><strong>${safeCode}</strong></td>
+                        <td class="small text-muted">${escapeHtml(name)}</td>
                         <td class="text-end">
                             <input type="number" step="0.0001" min="0" class="form-control form-control-sm text-end rates-rate-input"
-                                   value="${rateVal}" data-code="${code}" style="max-width:180px;display:inline-block;">
+                                   value="${rateVal}" data-code="${safeCode}" style="max-width:180px;display:inline-block;">
                         </td>
                         <td>${sourceBadge}</td>
                         <td class="text-end">
-                            <button class="btn btn-sm btn-outline-danger rates-remove-btn" data-code="${code}" title="Xóa">
+                            <button class="btn btn-sm btn-outline-danger rates-remove-btn" data-code="${safeCode}" title="Xóa">
                                 <i class="fas fa-times"></i>
                             </button>
                         </td>
@@ -2974,7 +3049,7 @@
                 method: 'GET',
                 success: function (resp) {
                     if (!resp.success) {
-                        $('#ratesStatus').html(`<span class="text-danger">${resp.error || 'Lỗi không xác định'}</span>`);
+                        $('#ratesStatus').html(`<span class="text-danger">${escapeHtml(resp.error || 'Lỗi không xác định')}</span>`);
                         showToast(resp.error || 'Không lấy được tỷ giá!', 'error');
                         return;
                     }
@@ -3005,10 +3080,10 @@
                         };
                         updated++;
                     });
-                    const srcLabel = SOURCE_LABEL[resp.source] || resp.source || 'API';
-                    const typeLabel = RATE_TYPE_LABEL[resp.rateType || rateType] || rateType;
-                    let msg = `Đã cập nhật ${updated} tỷ giá từ <strong>${srcLabel}</strong> (${typeLabel}, ngày ${(resp.date || date || '').slice(0, 10)}).`;
-                    if (missing.length > 0) msg += ` Không có tỷ giá cho: ${missing.join(', ')}.`;
+                    const srcLabel = SOURCE_LABEL[resp.source] || escapeHtml(resp.source || 'API');
+                    const typeLabel = escapeHtml(RATE_TYPE_LABEL[resp.rateType || rateType] || rateType);
+                    let msg = `Đã cập nhật ${updated} tỷ giá từ <strong>${srcLabel}</strong> (${typeLabel}, ngày ${escapeHtml((resp.date || date || '').slice(0, 10))}).`;
+                    if (missing.length > 0) msg += ` Không có tỷ giá cho: ${escapeHtml(missing.join(', '))}.`;
                     $('#ratesStatus').html(`<span class="text-success">${msg}</span>`);
                     renderRatesTable();
                     showToast(`Đã lấy ${updated} tỷ giá từ ${srcLabel}!`, 'success');
@@ -3016,7 +3091,7 @@
                 error: function (xhr) {
                     let err = 'Không kết nối được máy chủ.';
                     try { err = JSON.parse(xhr.responseText).error || err; } catch (_) {}
-                    $('#ratesStatus').html(`<span class="text-danger">${err}</span>`);
+                    $('#ratesStatus').html(`<span class="text-danger">${escapeHtml(err)}</span>`);
                     showToast(err, 'error');
                 },
                 complete: function () {
@@ -3166,6 +3241,7 @@
                 $.ajax({
                     url: `/api/events/${eventCode}`,
                     method: 'DELETE',
+                    headers: { 'X-Edit-Key': getOrCreateEditKey(eventCode) },
                     success: function(response) {
                         if (response.success) {
                             showToast('Đã xoá sự kiện thành công!', 'success');
@@ -3184,8 +3260,12 @@
                             showToast('Lỗi khi xoá sự kiện!', 'error');
                         }
                     },
-                    error: function() {
-                        showToast('Lỗi kết nối server!', 'error');
+                    error: function(xhr) {
+                        if (xhr.status === 403) {
+                            showToast('Bạn không có quyền xóa sự kiện này.', 'error');
+                        } else {
+                            showToast('Lỗi kết nối server!', 'error');
+                        }
                     }
                 });
             }
@@ -3195,16 +3275,11 @@
         $(document).on('click', '.share-event-btn', function (e) {
             e.stopPropagation(); // Ngăn không cho sự kiện propagate lên parent
             const eventCode = $(this).data('event-code');
-            
-            // Tạo URL chỉ xem
-            const shareUrlViewOnly = window.location.origin + '/share/' + eventCode;
-            
-            // Tạo URL có thể chỉnh sửa
-            const shareUrlEditable = window.location.origin + window.location.pathname + '?event_code=' + eventCode + '&allow_edit=true';
 
-            // Hiển thị modal với 2 loại link
-            $('#shareLinkViewOnly').val(shareUrlViewOnly);
-            $('#shareLinkEditable').val(shareUrlEditable);
+            // Link chỉnh sửa chứa khóa bí mật; link chỉ xem chỉ có event_code
+            const links = buildShareLinks(eventCode);
+            $('#shareLinkViewOnly').val(links.viewOnly);
+            $('#shareLinkEditable').val(links.editable);
             $('#shareEventModal').modal('show');
         });
 
@@ -3246,13 +3321,14 @@
                         <small>Vừa xong</small>
                         <button type="button" class="btn-close ${type === 'success' || type === 'error' ? 'btn-close-white' : ''}" data-bs-dismiss="toast" aria-label="Close"></button>
                     </div>
-                    <div class="toast-body">
-                        ${message}
-                    </div>
+                    <div class="toast-body"></div>
                 </div>
             `;
 
-            $('#toastContainer').append(toastHTML);
+            // Set nội dung bằng .text() — message thường chứa dữ liệu người dùng
+            const $toast = $(toastHTML);
+            $toast.find('.toast-body').text(message);
+            $('#toastContainer').append($toast);
             const toastElement = document.getElementById(toastId);
             const toast = new bootstrap.Toast(toastElement, {
                 autohide: true,
@@ -3303,15 +3379,10 @@
                 return;
             }
 
-            // Tạo URL chỉ xem
-            const shareUrlViewOnly = window.location.origin + '/share/' + currentEventCode;
-            
-            // Tạo URL có thể chỉnh sửa
-            const shareUrlEditable = window.location.origin + window.location.pathname + '?event_code=' + currentEventCode + '&allow_edit=true';
-
-            // Hiển thị modal với 2 loại link
-            $('#shareLinkViewOnly').val(shareUrlViewOnly);
-            $('#shareLinkEditable').val(shareUrlEditable);
+            // Link chỉnh sửa chứa khóa bí mật; link chỉ xem chỉ có event_code
+            const links = buildShareLinks(currentEventCode);
+            $('#shareLinkViewOnly').val(links.viewOnly);
+            $('#shareLinkEditable').val(links.editable);
             $('#shareEventModal').modal('show');
         });
 
@@ -3358,8 +3429,8 @@
             $('#expensePayer').val(expense.payer);
             $('#benefitType').val(expense.benefitType || 'all').trigger('change');
             const curEdit = getCurrencyOfExpense(expense);
-            if ($('#expenseCurrency option[value="' + curEdit + '"]').length === 0) {
-                $('#expenseCurrency').append(`<option value="${curEdit}">${curEdit}</option>`);
+            if ($('#expenseCurrency').find('option').filter(function () { return this.value === curEdit; }).length === 0) {
+                $('#expenseCurrency').append($('<option>').val(curEdit).text(curEdit));
             }
             $('#expenseCurrency').val(curEdit);
 
