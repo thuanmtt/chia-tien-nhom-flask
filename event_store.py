@@ -168,3 +168,217 @@ def rows_to_document(rows):
         'couples': couples,
         'rates': rates,
     }
+
+
+# ===== Tầng SQL =====
+
+def replace_event_children(cursor, event_id, data):
+    """Xóa toàn bộ dữ liệu con của event rồi ghi lại từ document.
+
+    PUT thay cả document nên delete+insert là đúng ngữ nghĩa. PHẢI được gọi
+    bên trong transaction do caller mở (BEGIN ... COMMIT) để không có trạng
+    thái nửa vời. expense_beneficiaries/couple_members tự xóa theo CASCADE.
+    """
+    rows = document_to_rows(data)
+
+    cursor.execute('DELETE FROM expenses WHERE event_id = %s', (event_id,))
+    cursor.execute('DELETE FROM couples WHERE event_id = %s', (event_id,))
+    cursor.execute('DELETE FROM members WHERE event_id = %s', (event_id,))
+    cursor.execute('DELETE FROM member_bank_info WHERE event_id = %s', (event_id,))
+    cursor.execute('DELETE FROM event_rates WHERE event_id = %s', (event_id,))
+
+    if rows['members']:
+        psycopg2.extras.execute_values(
+            cursor,
+            'INSERT INTO members (event_id, name, position) VALUES %s',
+            [(event_id, r['name'], r['position']) for r in rows['members']],
+        )
+
+    if rows['expenses']:
+        inserted = psycopg2.extras.execute_values(
+            cursor,
+            '''INSERT INTO expenses (event_id, title, amount, currency, payer_name,
+                                     benefit_type, expense_date, created_time,
+                                     updated_time, position)
+               VALUES %s RETURNING id, position''',
+            [
+                (event_id, r['title'], r['amount'], r['currency'], r['payer_name'],
+                 r['benefit_type'], r['expense_date'], r['created_time'],
+                 r['updated_time'], r['position'])
+                for r in rows['expenses']
+            ],
+            fetch=True,
+        )
+        expense_id_by_position = {row[1]: row[0] for row in inserted}
+        if rows['expense_beneficiaries']:
+            psycopg2.extras.execute_values(
+                cursor,
+                'INSERT INTO expense_beneficiaries (expense_id, member_name, position) VALUES %s',
+                [
+                    (expense_id_by_position[b['expense_position']], b['member_name'], b['position'])
+                    for b in rows['expense_beneficiaries']
+                ],
+            )
+
+    if rows['member_bank_info']:
+        psycopg2.extras.execute_values(
+            cursor,
+            'INSERT INTO member_bank_info (event_id, member_name, bank, account) VALUES %s',
+            [(event_id, r['member_name'], r['bank'], r['account']) for r in rows['member_bank_info']],
+        )
+
+    if rows['couples']:
+        inserted = psycopg2.extras.execute_values(
+            cursor,
+            '''INSERT INTO couples (event_id, client_id, label, primary_name, position)
+               VALUES %s RETURNING id, position''',
+            [
+                (event_id, r['client_id'], r['label'], r['primary_name'], r['position'])
+                for r in rows['couples']
+            ],
+            fetch=True,
+        )
+        couple_id_by_position = {row[1]: row[0] for row in inserted}
+        if rows['couple_members']:
+            psycopg2.extras.execute_values(
+                cursor,
+                'INSERT INTO couple_members (couple_id, member_name, position) VALUES %s',
+                [
+                    (couple_id_by_position[cm['couple_position']], cm['member_name'], cm['position'])
+                    for cm in rows['couple_members']
+                ],
+            )
+
+    if rows['event_rates']:
+        psycopg2.extras.execute_values(
+            cursor,
+            '''INSERT INTO event_rates (event_id, currency_code, rate, source,
+                                        rate_date, rate_type, currency_name)
+               VALUES %s''',
+            [
+                (event_id, r['currency_code'], r['rate'], r['source'],
+                 r['rate_date'], r['rate_type'], r['currency_name'])
+                for r in rows['event_rates']
+            ],
+        )
+
+
+def load_event_children(cursor, event_id):
+    """Đọc dữ liệu con của event → phần document (không gồm title).
+
+    cursor PHẢI là RealDictCursor. Nối beneficiaries/couple_members về
+    *_position bằng JOIN vì tầng thuần không biết id DB.
+    """
+    cursor.execute(
+        'SELECT name, position FROM members WHERE event_id = %s ORDER BY position',
+        (event_id,),
+    )
+    member_rows = cursor.fetchall()
+
+    cursor.execute(
+        '''SELECT title, amount, currency, payer_name, benefit_type,
+                  expense_date, created_time, updated_time, position
+           FROM expenses WHERE event_id = %s ORDER BY position''',
+        (event_id,),
+    )
+    expense_rows = cursor.fetchall()
+
+    cursor.execute(
+        '''SELECT x.position AS expense_position, b.member_name, b.position
+           FROM expense_beneficiaries b
+           JOIN expenses x ON x.id = b.expense_id
+           WHERE x.event_id = %s''',
+        (event_id,),
+    )
+    beneficiary_rows = cursor.fetchall()
+
+    cursor.execute(
+        'SELECT member_name, bank, account FROM member_bank_info WHERE event_id = %s ORDER BY member_name',
+        (event_id,),
+    )
+    bank_rows = cursor.fetchall()
+
+    cursor.execute(
+        '''SELECT client_id, label, primary_name, position
+           FROM couples WHERE event_id = %s ORDER BY position''',
+        (event_id,),
+    )
+    couple_rows = cursor.fetchall()
+
+    cursor.execute(
+        '''SELECT c.position AS couple_position, cm.member_name, cm.position
+           FROM couple_members cm
+           JOIN couples c ON c.id = cm.couple_id
+           WHERE c.event_id = %s''',
+        (event_id,),
+    )
+    couple_member_rows = cursor.fetchall()
+
+    cursor.execute(
+        '''SELECT currency_code, rate, source, rate_date, rate_type, currency_name
+           FROM event_rates WHERE event_id = %s''',
+        (event_id,),
+    )
+    rate_rows = cursor.fetchall()
+
+    return rows_to_document({
+        'members': member_rows,
+        'expenses': expense_rows,
+        'expense_beneficiaries': beneficiary_rows,
+        'member_bank_info': bank_rows,
+        'couples': couple_rows,
+        'couple_members': couple_member_rows,
+        'event_rates': rate_rows,
+    })
+
+
+def load_events_summary(cursor, codes):
+    """Cho /api/events/lookup: các trường tối thiểu danh sách "Sự Kiện Của Tôi"
+    cần (đếm thành viên/chi phí + tính tổng theo rates). Giữ shape response cũ
+    nhưng expenses chỉ gồm {amount, currency}. cursor là RealDictCursor."""
+    cursor.execute(
+        'SELECT id, event_code, title, updated_at FROM events WHERE event_code = ANY(%s)',
+        (codes,),
+    )
+    events = cursor.fetchall()
+    if not events:
+        return []
+    event_ids = [e['id'] for e in events]
+
+    cursor.execute(
+        'SELECT event_id, name FROM members WHERE event_id = ANY(%s::uuid[]) ORDER BY position',
+        (event_ids,),
+    )
+    members_by_event = {}
+    for r in cursor.fetchall():
+        members_by_event.setdefault(r['event_id'], []).append(r['name'])
+
+    cursor.execute(
+        'SELECT event_id, amount, currency FROM expenses WHERE event_id = ANY(%s::uuid[])',
+        (event_ids,),
+    )
+    expenses_by_event = {}
+    for r in cursor.fetchall():
+        expenses_by_event.setdefault(r['event_id'], []).append(
+            {'amount': _num(r['amount']), 'currency': r['currency']}
+        )
+
+    cursor.execute(
+        'SELECT event_id, currency_code, rate FROM event_rates WHERE event_id = ANY(%s::uuid[])',
+        (event_ids,),
+    )
+    rates_by_event = {}
+    for r in cursor.fetchall():
+        rates_by_event.setdefault(r['event_id'], {})[r['currency_code']] = {'rate': _num(r['rate'])}
+
+    return [
+        {
+            'event_code': e['event_code'],
+            'title': e['title'],
+            'members': members_by_event.get(e['id'], []),
+            'expenses': expenses_by_event.get(e['id'], []),
+            'rates': rates_by_event.get(e['id'], {}),
+            'updated_at': e['updated_at'].isoformat() if e['updated_at'] else None,
+        }
+        for e in events
+    ]
