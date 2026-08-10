@@ -74,17 +74,24 @@ def _check_edit_permission(cursor, event_code):
     """Kiểm tra quyền sửa/xóa event.
 
     Trả về (status, event_id, updated_at) với status: 'not_found' | 'forbidden' | 'ok'.
+    Quyền hợp lệ khi: là owner (JWT Supabase) HOẶC X-Edit-Key khớp.
     Event cũ chưa có edit_key: chấp nhận request và "nhận" key client gửi lên
     (nếu có) làm key chính thức, để dữ liệu cũ không bị khóa ngoài ý muốn.
     """
     cursor.execute(
-        'SELECT id, edit_key, updated_at FROM events WHERE event_code = %s',
+        'SELECT id, edit_key, owner_id, updated_at FROM events WHERE event_code = %s',
         (event_code,),
     )
     row = cursor.fetchone()
     if row is None:
         return 'not_found', None, None
-    event_id, stored, updated_at = row[0], row[1], row[2]
+    event_id, stored, owner_id, updated_at = row[0], row[1], row[2], row[3]
+
+    # Owner đăng nhập có toàn quyền — kể cả khi client gửi kèm key sai/tự sinh
+    user_id = request_user_id(request)
+    if owner_id and user_id and str(owner_id) == user_id:
+        return 'ok', event_id, updated_at
+
     provided = _provided_edit_key()
     if stored:
         if not provided or not hmac.compare_digest(stored, provided):
@@ -230,6 +237,37 @@ def lookup_events():
         return _server_error(e)
 
 
+@app.route('/api/my-events')
+@limiter.limit('30 per minute; 500 per day')
+def my_events():
+    """Danh sách event thuộc tài khoản đang đăng nhập — đồng bộ "Sự Kiện Của Tôi"
+    giữa các thiết bị. Chỉ trả metadata, không có edit_key (owner sửa bằng JWT)."""
+    try:
+        user_id = request_user_id(request)
+        if not user_id:
+            return jsonify({'success': False, 'error': 'Vui lòng đăng nhập.'}), 401
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
+            '''SELECT event_code, title, updated_at FROM events
+               WHERE owner_id = %s::uuid ORDER BY updated_at DESC''',
+            (user_id,),
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        return jsonify({'success': True, 'events': [
+            {
+                'event_code': r['event_code'],
+                'title': r['title'],
+                'updated_at': r['updated_at'].isoformat() if r['updated_at'] else None,
+            } for r in rows
+        ]})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return _server_error(e)
+
+
 @app.route('/api/events/<event_code>', methods=['GET'])
 @limiter.limit('120 per minute')
 def get_event(event_code):
@@ -237,7 +275,7 @@ def get_event(event_code):
         conn = get_db_connection()
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute(
-            '''SELECT id, event_code, title, edit_key, created_at, updated_at
+            '''SELECT id, event_code, title, edit_key, owner_id, created_at, updated_at
                FROM events WHERE event_code = %s''',
             (event_code,),
         )
@@ -253,7 +291,10 @@ def get_event(event_code):
         # có khóa → chỉ khi header X-Edit-Key khớp. UI dựa vào cờ này.
         stored_key = event['edit_key']
         provided = _provided_edit_key()
-        can_edit = (not stored_key) or bool(provided and hmac.compare_digest(stored_key, provided))
+        user_id = request_user_id(request)
+        is_owner = bool(event['owner_id'] and user_id and str(event['owner_id']) == user_id)
+        can_edit = is_owner or (not stored_key) or bool(
+            provided and hmac.compare_digest(stored_key, provided))
         return jsonify({
             'success': True,
             'event': {
