@@ -30,7 +30,9 @@ events (
     event_code   text UNIQUE NOT NULL,
     title        text NOT NULL,
     edit_key     text,                          -- NULL với event legacy chưa "adopt" key
-    owner_id     uuid REFERENCES auth.users(id) ON DELETE SET NULL,  -- NULL: event migrate/legacy
+    owner_id     uuid,   -- id user Supabase Auth; NULL: event migrate/legacy.
+                         -- Không FK sang auth.users để schema chạy được trên
+                         -- Postgres thường khi dev/test; chỉ dùng để lọc quyền.
     created_at   timestamptz NOT NULL DEFAULT now(),
     updated_at   timestamptz NOT NULL DEFAULT now()
 );
@@ -167,7 +169,10 @@ API giữ nguyên contract document. Backend thêm hai hàm đối xứng:
   khử trùng lặp theo tên — giữ lần xuất hiện đầu — cho `members`, `beneficiaries` của
   từng expense, và `couple_members`. (Tham chiếu theo tên nên các bản sao vốn không
   phân biệt được; hành vi hiển thị không đổi.)
-- `POST /api/events/lookup` (batch cho "Sự Kiện Của Tôi") chỉ cần bảng `events` — giữ nguyên.
+- `POST /api/events/lookup` (batch cho "Sự Kiện Của Tôi"): response shape giữ nguyên
+  (UI chỉ dùng số thành viên, số chi phí, tổng tiền theo rates); backend đọc gộp từ
+  `events` + 3 bảng con (`members`, `expenses` chỉ lấy amount/currency, `event_rates`)
+  bằng 4 query cho cả batch.
 
 **Bất biến round-trip:** PUT document D rồi GET phải trả về document tương đương D
 (cùng nội dung, thứ tự giữ nguyên). Có test tự động cho bất biến này.
