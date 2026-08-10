@@ -2482,7 +2482,7 @@
                 $.ajax({
                     url: `/api/events/${eventCode}`,
                     method: 'DELETE',
-                    headers: { 'X-Edit-Key': getOrCreateEditKey(eventCode) },
+                    headers: AppAuth.authHeaders({ 'X-Edit-Key': getOrCreateEditKey(eventCode) }),
                     success: function(response) {
                         if (response.success) {
                             showToast('Đã xoá sự kiện thành công!', 'success');
