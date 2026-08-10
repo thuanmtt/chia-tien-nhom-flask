@@ -22,6 +22,8 @@ BASE_URL=http://localhost:5002 python3 test_api.py
 # Unit tests for the split algorithm (pure logic, no server/DB needed)
 node test_split.js
 
+python3 test_event_store.py   # unit test decompose/compose (không cần DB)
+
 # Syntax-check the frontend
 node --check static/app.js && node --check static/split.js && node --check static/sw.js
 ```
@@ -34,7 +36,16 @@ When Postgres is unavailable locally, test backend logic by monkeypatching `verc
 
 **Backend** — `vercel_app.py` is the entire backend. `api/index.py` is a thin Vercel entry point that adds the repo root to `sys.path` and imports it (`vercel.json` routes everything there). `validation.py` holds `validate_event_payload()` — every POST/PUT body goes through it (type checks + size caps, raises `ValidationError` with client-safe Vietnamese messages → 400).
 
-**Storage model** — one `events` table, document-blob style: `members`, `expenses`, `bank_info`, `couples`, `rates` are JSON strings in TEXT columns. Clients PUT the whole document. Concurrency is handled with optimistic locking: PUT carries `expectedUpdatedAt` (the `updated_at` the client last saw); a mismatch returns 409 and the frontend reloads instead of overwriting. PUT/POST return the new `updated_at` (via SQL `RETURNING`).
+**Storage model** — schema quan hệ trên Supabase Postgres (`schema.sql`): bảng `events`
+(title, event_code, edit_key, owner_id, updated_at) + các bảng con `members`, `expenses`,
+`expense_beneficiaries`, `member_bank_info`, `couples`, `couple_members`, `event_rates`.
+Thành viên định danh bằng TÊN (member_name text, không FK id) — đúng ngữ nghĩa document
+của client (chấp nhận tên "mồ côi"). API vẫn kiểu document: client GET/PUT cả document;
+`event_store.py` decompose/compose (PUT = xóa bảng con + insert lại trong 1 transaction,
+khử trùng lặp tên vì validation không dedupe). Concurrency: optimistic locking như cũ
+(`expectedUpdatedAt` → 409). Kết nối qua Supabase pooler transaction mode (port 6543).
+Bảng nào cũng bật RLS không policy — chặn PostgREST công khai; Flask (role postgres,
+owner bảng) không bị ảnh hưởng. `migrate_to_supabase.py` chuyển dữ liệu từ DB cũ.
 
 **Auth model** — no user accounts. Two tokens per event:
 - `event_code` — public identifier, appears in share links.

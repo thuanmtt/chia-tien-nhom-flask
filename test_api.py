@@ -238,6 +238,46 @@ def test_delete_event(event_code, edit_key):
         print(f"❌ Delete event failed - Status: {response.status_code}")
         return False
 
+def test_roundtrip_document(event_code, edit_key):
+    """PUT document đầy đủ (đa tiền tệ, couples, rates) rồi GET so từng trường —
+    bất biến quan trọng nhất của schema quan hệ: không mất/không méo dữ liệu."""
+    print("Testing document round-trip...")
+    doc = {
+        "title": "Round Trip Đà Lạt",
+        "members": ["An", "Bình", "Chi"],
+        "expenses": [
+            {"title": "Khách sạn", "amount": 1500000, "currency": "VND",
+             "payer": "An", "benefitType": "all", "beneficiaries": [],
+             "expense_date": "2026-08-01", "created_time": "2026-08-01T10:00:00",
+             "updated_time": "2026-08-01T10:00:00"},
+            {"title": "Ăn tối", "amount": 45.5, "currency": "USD",
+             "payer": "Bình", "benefitType": "selected",
+             "beneficiaries": ["An", "Chi"],
+             "expense_date": "2026-08-02", "created_time": "", "updated_time": ""},
+        ],
+        "bankInfo": {"An": {"bank": "VCB", "account": "123456"}},
+        "couples": [{"id": "c1", "label": "Vợ chồng An",
+                     "members": ["An", "Bình"], "primary": "An"}],
+        "rates": {"USD": {"rate": 25000, "source": "test", "rateDate": "2026-08-01",
+                          "rateType": "mid", "currencyName": "US Dollar"}},
+    }
+    r = requests.get(f"{BASE_URL}/api/events/{event_code}")
+    doc_put = dict(doc)
+    doc_put["expectedUpdatedAt"] = r.json()["event"]["updated_at"]
+    r = requests.put(f"{BASE_URL}/api/events/{event_code}", json=doc_put,
+                     headers={'X-Edit-Key': edit_key})
+    if r.status_code != 200:
+        print(f"❌ Round-trip PUT failed - Status: {r.status_code} {r.text}")
+        return False
+    r = requests.get(f"{BASE_URL}/api/events/{event_code}")
+    got = r.json()["event"]
+    for key in ("title", "members", "expenses", "bankInfo", "couples", "rates"):
+        if got[key] != doc[key]:
+            print(f"❌ Round-trip lệch ở '{key}':\n  gửi:  {doc[key]}\n  nhận: {got[key]}")
+            return False
+    print("✅ Round-trip OK - document giữ nguyên qua PUT/GET")
+    return True
+
 def main():
     """Chạy tất cả tests"""
     print("🚀 Starting API tests...\n")
@@ -261,6 +301,10 @@ def main():
 
     # Test update event
     if not test_update_event(event_code, edit_key):
+        return
+
+    # Test round-trip document trên schema quan hệ
+    if not test_roundtrip_document(event_code, edit_key):
         return
 
     # Test delete event

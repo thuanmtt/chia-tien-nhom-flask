@@ -1,6 +1,6 @@
 # Ứng Dụng Chia Tiền Nhóm - Flask Version
 
-Ứng dụng chia tiền nhóm online nhanh chóng và tiện lợi, được xây dựng bằng Flask với Postgres (deploy trên Vercel).
+Ứng dụng chia tiền nhóm online nhanh chóng và tiện lợi, được xây dựng bằng Flask với Postgres (deploy trên Vercel, database trên Supabase).
 
 ## Tính năng chính
 
@@ -11,14 +11,14 @@
 - ✅ Chia sẻ sự kiện qua event_code
 - ✅ Cấu hình thông tin ngân hàng cho từng thành viên
 - ✅ Tạo QR code chuyển tiền
-- ✅ Lưu trữ dữ liệu trên Postgres (Vercel/Neon)
+- ✅ Lưu trữ dữ liệu trên Postgres (Supabase)
 
 ## Cài đặt và chạy
 
 ### Yêu cầu hệ thống
 - Python 3.9+
 - pip
-- Một database Postgres (Neon/Vercel Postgres, hoặc Postgres local)
+- Một database Postgres trên Supabase (schema quan hệ, xem `schema.sql`), hoặc Postgres local
 
 ### Cài đặt
 
@@ -33,14 +33,15 @@ cd chia-tien-nhom-flask
 pip install -r requirements.txt
 ```
 
-3. Tạo bảng (chạy 1 lần trên database):
+3. Tạo bảng (chạy trên database Supabase, idempotent — chạy lại không lỗi):
 ```bash
 psql "$DATABASE_URL" -f schema.sql
 ```
 
-4. Chạy ứng dụng:
+4. Chạy ứng dụng — `DATABASE_URL` là connection string qua Supabase pooler
+   (transaction mode, cổng 6543):
 ```bash
-DATABASE_URL=postgres://... python vercel_app.py
+DATABASE_URL="postgres://...pooler...:6543/postgres" python vercel_app.py
 ```
 
 5. Mở trình duyệt và truy cập:
@@ -97,10 +98,23 @@ từ lần ghi hợp lệ đầu tiên có gửi `X-Edit-Key`; từ đó về sa
 
 ## Biến môi trường
 
-- `DATABASE_URL` / `POSTGRES_URL` - Kết nối Postgres (bản deploy Vercel, `vercel_app.py`)
+- `DATABASE_URL` / `POSTGRES_URL` - Kết nối Postgres Supabase qua pooler (transaction
+  mode, cổng 6543), ví dụ: `postgres://postgres.<project>:<password>@<host>:6543/postgres`
 - `RATELIMIT_STORAGE_URI` - Storage cho rate limiter (mặc định `memory://`).
   Trên serverless (Vercel), `memory://` gần như vô hiệu vì mỗi instance có bộ nhớ
   riêng — nên trỏ tới Redis, ví dụ Upstash: `redis://default:<password>@<host>:<port>`
+
+## Migrate dữ liệu từ DB cũ
+
+Nếu database cũ (JSON blob, ví dụ Neon) còn dữ liệu cần giữ, chạy `migrate_to_supabase.py`
+để chuyển sang schema quan hệ mới (chạy lại được — upsert theo `event_code`,
+giữ nguyên `event_code`/`edit_key` nên link chia sẻ cũ vẫn sống):
+
+```bash
+OLD_DATABASE_URL=postgres://...(Neon) \
+DATABASE_URL=postgres://...(Supabase pooler 6543) \
+python3 migrate_to_supabase.py
+```
 
 ## Cách sử dụng
 
@@ -135,15 +149,11 @@ Ví dụ: `250115A1B2C3D4`
 
 ## Database Schema
 
-### Bảng `events`
-- `id`: UUID chính
-- `event_code`: Mã sự kiện duy nhất
-- `title`: Tên sự kiện
-- `members`: JSON array thành viên
-- `expenses`: JSON array chi phí
-- `bank_info`: JSON object thông tin ngân hàng
-- `created_at`: Thời gian tạo
-- `updated_at`: Thời gian cập nhật
+Schema quan hệ, xem chi tiết ở `schema.sql`. Bảng `events` (title, event_code,
+edit_key, owner_id, created_at, updated_at) là bảng chính; các bảng con `members`,
+`expenses`, `expense_beneficiaries`, `member_bank_info`, `couples`, `couple_members`,
+`event_rates` lưu chi tiết theo `event_id`. API vẫn nhận/trả nguyên document JSON
+như cũ — `event_store.py` lo việc decompose/compose giữa document và các bảng.
 
 ## LocalStorage
 
