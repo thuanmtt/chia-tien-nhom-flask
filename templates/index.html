@@ -65,6 +65,7 @@
                         <i class="fas fa-plus me-1"></i> Tạo Sự Kiện Mới
                     </a>
                 </li>
+                <li class="nav-item d-flex align-items-center ms-lg-2" id="authArea"></li>
                 <li class="nav-item">
                     <a class="nav-link" href="#" id="savedEventsBtn" data-bs-toggle="modal"
                        data-bs-target="#savedEventsModal">
@@ -595,6 +596,67 @@
     </div>
 </div>
 
+<!-- Modal đăng nhập / đăng ký (Supabase Auth) -->
+<div class="modal fade" id="authModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-user me-2"></i>Tài Khoản</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="authMessage" class="small mb-2"></div>
+
+                <div id="authPaneLogin">
+                    <form id="authLoginForm">
+                        <div class="mb-2">
+                            <label class="form-label" for="authLoginEmail">Email</label>
+                            <input type="email" class="form-control" id="authLoginEmail" autocomplete="email">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label" for="authLoginPassword">Mật khẩu</label>
+                            <input type="password" class="form-control" id="authLoginPassword" autocomplete="current-password">
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100 mb-2">Đăng nhập</button>
+                    </form>
+                    <button type="button" class="btn btn-outline-danger w-100 mb-2" id="authGoogleBtn">
+                        <i class="fab fa-google me-1"></i>Đăng nhập với Google
+                    </button>
+                    <div class="d-flex justify-content-between">
+                        <button type="button" class="btn btn-link btn-sm p-0" id="authShowRegister">Chưa có tài khoản? Đăng ký</button>
+                        <button type="button" class="btn btn-link btn-sm p-0" id="authForgotBtn">Quên mật khẩu?</button>
+                    </div>
+                </div>
+
+                <div id="authPaneRegister" class="d-none">
+                    <form id="authRegisterForm">
+                        <div class="mb-2">
+                            <label class="form-label" for="authRegisterEmail">Email</label>
+                            <input type="email" class="form-control" id="authRegisterEmail" autocomplete="email">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label" for="authRegisterPassword">Mật khẩu (tối thiểu 6 ký tự)</label>
+                            <input type="password" class="form-control" id="authRegisterPassword" autocomplete="new-password">
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100 mb-2">Đăng ký</button>
+                    </form>
+                    <button type="button" class="btn btn-link btn-sm p-0" id="authShowLogin">Đã có tài khoản? Đăng nhập</button>
+                </div>
+
+                <div id="authPaneRecovery" class="d-none">
+                    <form id="authRecoveryForm">
+                        <div class="mb-3">
+                            <label class="form-label" for="authRecoveryPassword">Mật khẩu mới (tối thiểu 6 ký tự)</label>
+                            <input type="password" class="form-control" id="authRecoveryPassword" autocomplete="new-password">
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100">Đổi mật khẩu</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Modal Xác Nhận (dùng chung thay cho confirm() native).
      Phải đứng SAU các modal khác trong DOM để hiện đè lên khi mở lồng nhau. -->
 <div class="modal fade" id="confirmModal" tabindex="-1">
@@ -635,7 +697,10 @@
         integrity="sha384-en/ztfPSRkGfME4KIm05joYXynqzUgbsG5nMrj/xEFAHXkeZfO3yMK8QQ+mP7p1/" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"
         integrity="sha384-Xl/CUCfJbzsngMp0CFxkmF0VW/8C160IsGujqeQlIhaGxKz2+JsIGORFqtCPeldF" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"
+        integrity="sha384-2zrRDgDHSYB/GN3nFW3fsZXoxEhKIr3N2h63Tc6DEOB9JJdFIu8xMJT2Cph/gBil" crossorigin="anonymous"></script>
 <script src="/static/split.js"></script>
+<script src="/static/auth.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>
