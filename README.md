@@ -39,9 +39,13 @@ psql "$DATABASE_URL" -f schema.sql
 ```
 
 4. Chạy ứng dụng — `DATABASE_URL` là connection string qua Supabase pooler
-   (transaction mode, cổng 6543):
+   (transaction mode, cổng 6543); `SUPABASE_URL` và `SUPABASE_ANON_KEY` lấy từ
+   Project Settings → API của project Supabase, cần để đăng nhập hoạt động:
 ```bash
-DATABASE_URL="postgres://...pooler...:6543/postgres" python vercel_app.py
+DATABASE_URL="postgres://...pooler...:6543/postgres" \
+SUPABASE_URL="https://<project-ref>.supabase.co" \
+SUPABASE_ANON_KEY="<anon-key>" \
+python vercel_app.py
 ```
 
 5. Mở trình duyệt và truy cập:
@@ -49,11 +53,24 @@ DATABASE_URL="postgres://...pooler...:6543/postgres" python vercel_app.py
 http://localhost:5002
 ```
 
+### Bật đăng nhập Google (Supabase Auth)
+
+1. Vào Supabase Dashboard → Authentication → Providers → bật **Google**, điền
+   Client ID/Secret lấy từ Google Cloud Console (OAuth 2.0 Client ID).
+2. Trong Google Cloud Console, thêm domain production và
+   `http://localhost:5002` vào danh sách Redirect URLs/Authorized redirect URIs
+   (URL callback do Supabase cung cấp ở màn hình bật provider).
+3. Trong Supabase Dashboard → Authentication → URL Configuration, thêm domain
+   production và `http://localhost:5002` vào **Redirect URLs**.
+
 ### Deploy Vercel
 
-Repo đã có sẵn `vercel.json` (entry `api/index.py` → `vercel_app.py`). Chỉ cần
-đặt env `DATABASE_URL` (hoặc `POSTGRES_URL`) trong project settings và chạy
-`schema.sql` trên database trước lần deploy đầu.
+Repo đã có sẵn `vercel.json` (entry `api/index.py` → `vercel_app.py`). Cần đặt
+các env sau trong project settings trước lần deploy: `DATABASE_URL` (hoặc
+`POSTGRES_URL`), `SUPABASE_URL`, `SUPABASE_ANON_KEY` (không đặt
+`SUPABASE_SERVICE_ROLE_KEY` — key này chỉ dùng trong test, tuyệt đối không
+đưa lên môi trường chạy app thật). Chạy `schema.sql` trên database trước lần
+deploy đầu.
 
 ## Cấu trúc dự án
 
@@ -100,6 +117,12 @@ từ lần ghi hợp lệ đầu tiên có gửi `X-Edit-Key`; từ đó về sa
 
 - `DATABASE_URL` / `POSTGRES_URL` - Kết nối Postgres Supabase qua pooler (transaction
   mode, cổng 6543), ví dụ: `postgres://postgres.<project>:<password>@<host>:6543/postgres`
+- `SUPABASE_URL` - URL project Supabase (`https://<project-ref>.supabase.co`), dùng để
+  verify JWT (JWKS) và trả cho frontend qua `GET /api/config`
+- `SUPABASE_ANON_KEY` - Anon/public key của project Supabase, trả cho frontend qua
+  `GET /api/config` để khởi tạo Supabase Auth client
+- `SUPABASE_SERVICE_ROLE_KEY` - **Chỉ dùng khi chạy `test_api.py`** (tạo/xóa user test
+  qua Admin API) — không cần và không nên đặt trên môi trường chạy app thật
 - `RATELIMIT_STORAGE_URI` - Storage cho rate limiter (mặc định `memory://`).
   Trên serverless (Vercel), `memory://` gần như vô hiệu vì mỗi instance có bộ nhớ
   riêng — nên trỏ tới Redis, ví dụ Upstash: `redis://default:<password>@<host>:<port>`
