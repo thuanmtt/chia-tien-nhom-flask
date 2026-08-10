@@ -6,6 +6,10 @@ Cách chạy (một lần, chạy lại được — upsert theo event_code):
     DATABASE_URL=postgres://...(Supabase pooler 6543) \
     python3 migrate_to_supabase.py
 
+⚠️  Chạy lại an toàn TRƯỚC khi cutover (DB cũ vẫn là nơi ghi chính thức). Sau khi
+   cutover — khi Supabase đã nhận ghi mới — event nào có updated_at trên Supabase
+   MỚI HƠN bản ghi ở DB cũ sẽ được tự động bỏ qua, không bị đè lại bằng snapshot cũ.
+
 - Giữ nguyên event_code, edit_key, created_at, updated_at → link chia sẻ cũ sống nguyên.
 - owner_id để NULL (event legacy chưa thuộc tài khoản nào).
 - Payload từng event đi qua validate_event_payload để chuẩn hóa như request thật;
@@ -41,6 +45,7 @@ def main():
     print(f'Đọc được {len(rows)} event từ DB cũ.')
 
     ok = 0
+    skipped = 0
     failed = []
     for row in rows:
         code = row['event_code']
@@ -54,16 +59,30 @@ def main():
                 'rates': json.loads(row['rates'] or '{}'),
             })
             cur = new_conn.cursor()
+            # created_at/updated_at ở DB cũ là TIMESTAMP không timezone, được ghi
+            # bằng CURRENT_TIMESTAMP theo UTC; khi insert sang cột timestamptz của
+            # Supabase, giá trị naive này được hiểu theo timezone của session hiện
+            # tại — đúng vì session cũng chạy UTC trên Supabase.
             cur.execute(
                 '''INSERT INTO events (event_code, title, edit_key, created_at, updated_at)
                    VALUES (%s, %s, %s, %s, %s)
                    ON CONFLICT (event_code) DO UPDATE
                    SET title = EXCLUDED.title, edit_key = EXCLUDED.edit_key,
                        created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at
+                   WHERE events.updated_at <= EXCLUDED.updated_at
                    RETURNING id''',
                 (code, doc['title'], row['edit_key'], row['created_at'], row['updated_at']),
             )
-            event_id = cur.fetchone()[0]
+            row_result = cur.fetchone()
+            if row_result is None:
+                # WHERE không khớp → event này trên Supabase đã có ghi mới hơn
+                # (sau cutover) — bỏ qua toàn bộ, không chạm tới bảng con.
+                new_conn.rollback()
+                cur.close()
+                skipped += 1
+                print(f'⏭️  {code}: bản trên Supabase mới hơn — bỏ qua')
+                continue
+            event_id = row_result[0]
             replace_event_children(cur, event_id, doc)
             new_conn.commit()
             cur.close()
@@ -76,7 +95,7 @@ def main():
 
     old_conn.close()
     new_conn.close()
-    print(f'\nXong: {ok}/{len(rows)} event migrate thành công.')
+    print(f'\nXong: {ok}/{len(rows)} event migrate thành công, {skipped} bị bỏ qua (đã mới hơn trên Supabase).')
     if failed:
         print(f'Lỗi ({len(failed)}): {", ".join(failed)}')
         return 1

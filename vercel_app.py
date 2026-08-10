@@ -192,7 +192,11 @@ def create_event():
             replace_event_children(cursor, event_id, data)
             cursor.execute('COMMIT')
         except Exception:
-            cursor.execute('ROLLBACK')
+            try:
+                cursor.execute('ROLLBACK')
+            except Exception:
+                # ROLLBACK có thể fail nếu connection đã chết — không che lỗi gốc
+                pass
             raise
         finally:
             cursor.close()
@@ -359,7 +363,11 @@ def update_event(event_code):
             replace_event_children(cursor, event_id, data)
             cursor.execute('COMMIT')
         except Exception:
-            cursor.execute('ROLLBACK')
+            try:
+                cursor.execute('ROLLBACK')
+            except Exception:
+                # ROLLBACK có thể fail nếu connection đã chết — không che lỗi gốc
+                pass
             raise
         finally:
             cursor.close()

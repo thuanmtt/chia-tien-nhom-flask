@@ -28,7 +28,7 @@ python3 test_event_store.py   # unit test decompose/compose (không cần DB)
 python3 test_supabase_auth.py   # unit test verify JWT (không cần DB/mạng)
 
 # Syntax-check the frontend
-node --check static/app.js && node --check static/split.js && node --check static/sw.js
+node --check static/app.js && node --check static/split.js && node --check static/sw.js && node --check static/auth.js
 ```
 
 There is no linter, bundler, or JS build step.

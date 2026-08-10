@@ -1555,6 +1555,10 @@
                     $('#savedEventsList').append('<p class="text-center text-muted">Chưa có sự kiện nào được lưu trên máy này.</p>');
                     return;
                 }
+                // Chỉ dọn các mã LOCAL đã thực sự được gửi đi tra cứu — mã bị cắt
+                // bớt do vượt giới hạn 50 sẽ không có trong response nhưng không
+                // đồng nghĩa là không còn tồn tại, nên không được prune.
+                const sentLocal = localCodes.filter(code => allCodes.includes(code));
                 $.ajax({
                     url: '/api/events/lookup',
                     method: 'POST',
@@ -1564,7 +1568,7 @@
                         const events = (response && response.events) || [];
                         // Mã LOCAL không còn tồn tại trên server → dọn khỏi localStorage
                         const found = new Set(events.map(e => e.event_code));
-                        localCodes
+                        sentLocal
                             .filter(code => !found.has(code))
                             .forEach(removeEventCodeFromLocalStorage);
                         displaySavedEvents(events);

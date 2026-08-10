@@ -29,6 +29,7 @@ def _get_jwk_client():
             f'{base}/auth/v1/.well-known/jwks.json',
             cache_keys=True,
             lifespan=3600,
+            timeout=5,  # tránh treo request khi cold-start trên Vercel serverless
         )
     return _jwk_client
 
