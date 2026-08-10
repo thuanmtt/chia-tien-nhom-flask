@@ -15,6 +15,7 @@ from werkzeug.exceptions import HTTPException
 
 from validation import ValidationError, validate_event_payload
 from event_store import replace_event_children, load_event_children, load_events_summary
+from supabase_auth import request_user_id
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -155,6 +156,11 @@ def manifest():
 @limiter.limit('10 per minute; 100 per day')
 def create_event():
     try:
+        # Tạo sự kiện yêu cầu đăng nhập (401 ≠ 403: chưa đăng nhập vs không có quyền)
+        user_id = request_user_id(request)
+        if not user_id:
+            return jsonify({'success': False, 'error': 'Vui lòng đăng nhập để tạo sự kiện.'}), 401
+
         try:
             data = validate_event_payload(request.get_json(silent=True))
         except ValidationError as e:
@@ -171,9 +177,9 @@ def create_event():
         try:
             cursor.execute('BEGIN')
             cursor.execute(
-                '''INSERT INTO events (event_code, title, edit_key)
-                   VALUES (%s, %s, %s) RETURNING id, updated_at''',
-                (event_code, data['title'], edit_key),
+                '''INSERT INTO events (event_code, title, edit_key, owner_id)
+                   VALUES (%s, %s, %s, %s) RETURNING id, updated_at''',
+                (event_code, data['title'], edit_key, user_id),
             )
             event_id, created_updated_at = cursor.fetchone()
             replace_event_children(cursor, event_id, data)
@@ -484,6 +490,17 @@ def get_banks():
         return jsonify(banks_data)
     except Exception as e:
         return _server_error(e)
+
+
+@app.route('/api/config')
+@limiter.exempt
+def get_config():
+    """Cấu hình public cho frontend (anon key của Supabase vốn là public;
+    index.html không dùng Jinja nên client lấy qua API này)."""
+    return jsonify({
+        'supabaseUrl': os.environ.get('SUPABASE_URL', ''),
+        'supabaseAnonKey': os.environ.get('SUPABASE_ANON_KEY', ''),
+    })
 
 
 @app.route('/api/events/<event_code>', methods=['DELETE'])
