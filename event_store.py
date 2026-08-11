@@ -332,13 +332,18 @@ def load_event_children(cursor, event_id):
     })
 
 
-def load_events_summary(cursor, codes):
+def load_events_summary(cursor, codes, viewer_user_id=None):
     """Cho /api/events/lookup: các trường tối thiểu danh sách "Sự Kiện Của Tôi"
     cần (đếm thành viên/chi phí + tính tổng theo rates). Giữ shape response cũ
-    nhưng expenses chỉ gồm {amount, currency}. cursor là RealDictCursor."""
+    nhưng expenses chỉ gồm {amount, currency}. cursor là RealDictCursor.
+
+    Event ở chế độ chia sẻ 'restricted' chỉ trả về cho chính owner
+    (viewer_user_id = None → loại hết event restricted)."""
     cursor.execute(
-        'SELECT id, event_code, title, updated_at FROM events WHERE event_code = ANY(%s)',
-        (codes,),
+        '''SELECT id, event_code, title, updated_at FROM events
+           WHERE event_code = ANY(%s)
+             AND (share_access <> 'restricted' OR owner_id = %s::uuid)''',
+        (codes, viewer_user_id),
     )
     events = cursor.fetchall()
     if not events:

@@ -81,26 +81,34 @@ def _provided_edit_key():
     return request.headers.get('X-Edit-Key', '').strip()
 
 
-def _check_edit_permission(cursor, event_code):
+def _check_edit_permission(cursor, event_code, allow_link_editor=True):
     """Kiểm tra quyền sửa/xóa event.
 
     Trả về (status, event_id, updated_at) với status: 'not_found' | 'forbidden' | 'ok'.
-    Quyền hợp lệ khi: là owner (JWT Supabase) HOẶC X-Edit-Key khớp.
+    Quyền hợp lệ khi: là owner (JWT Supabase) HOẶC event chia sẻ ở chế độ
+    "ai có link đều chỉnh sửa" (share_access='link' + share_role='editor',
+    trừ DELETE — allow_link_editor=False) HOẶC X-Edit-Key khớp.
     Event cũ chưa có edit_key: chấp nhận request và "nhận" key client gửi lên
     (nếu có) làm key chính thức, để dữ liệu cũ không bị khóa ngoài ý muốn.
     """
     cursor.execute(
-        'SELECT id, edit_key, owner_id, updated_at FROM events WHERE event_code = %s',
+        '''SELECT id, edit_key, owner_id, updated_at, share_access, share_role
+           FROM events WHERE event_code = %s''',
         (event_code,),
     )
     row = cursor.fetchone()
     if row is None:
         return 'not_found', None, None
-    event_id, stored, owner_id, updated_at = row[0], row[1], row[2], row[3]
+    event_id, stored, owner_id, updated_at, share_access, share_role = row
 
     # Owner đăng nhập có toàn quyền — kể cả khi client gửi kèm key sai/tự sinh
     user_id = request_user_id(request)
     if owner_id and user_id and str(owner_id) == user_id:
+        return 'ok', event_id, updated_at
+
+    # Chia sẻ kiểu Google Docs: "Bất kỳ ai có đường liên kết — Người chỉnh sửa"
+    # → không cần key (nhưng không được xóa event; xem caller DELETE)
+    if allow_link_editor and share_access == 'link' and share_role == 'editor':
         return 'ok', event_id, updated_at
 
     provided = _provided_edit_key()
@@ -243,7 +251,8 @@ def lookup_events():
 
         conn = get_db_connection()
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        events = load_events_summary(cursor, codes)
+        # Event ở chế độ "Hạn chế" chỉ hiện với chính owner (đăng nhập)
+        events = load_events_summary(cursor, codes, viewer_user_id=request_user_id(request))
         cursor.close()
         return jsonify({'success': True, 'events': events})
     except HTTPException:
@@ -425,7 +434,8 @@ def get_event(event_code):
         conn = get_db_connection()
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute(
-            '''SELECT id, event_code, title, edit_key, owner_id, created_at, updated_at
+            '''SELECT id, event_code, title, edit_key, owner_id, share_access, share_role,
+                      created_at, updated_at
                FROM events WHERE event_code = %s''',
             (event_code,),
         )
@@ -434,17 +444,27 @@ def get_event(event_code):
             cursor.close()
             return jsonify({'success': False, 'error': 'Event not found'}), 404
 
-        doc = load_event_children(cursor, event['id'])
-        cursor.close()
-
-        # Quyền sửa: sự kiện chưa có khóa (legacy) → ai cũng sửa được;
-        # có khóa → chỉ khi header X-Edit-Key khớp. UI dựa vào cờ này.
         stored_key = event['edit_key']
         provided = _provided_edit_key()
         user_id = request_user_id(request)
         is_owner = bool(event['owner_id'] and user_id and str(event['owner_id']) == user_id)
-        can_edit = is_owner or (not stored_key) or bool(
-            provided and hmac.compare_digest(stored_key, provided))
+        key_ok = bool(stored_key and provided and hmac.compare_digest(stored_key, provided))
+
+        # Chế độ "Hạn chế": chỉ owner hoặc người cầm edit_key xem được
+        if event['share_access'] == 'restricted' and not (is_owner or key_ok):
+            cursor.close()
+            return jsonify({
+                'success': False,
+                'error': 'Sự kiện đang ở chế độ hạn chế — chỉ chủ sở hữu mới truy cập được.',
+            }), 403
+
+        doc = load_event_children(cursor, event['id'])
+        cursor.close()
+
+        # Quyền sửa: owner / key đúng / sự kiện chưa có khóa (legacy) /
+        # chia sẻ "ai có link đều chỉnh sửa". UI dựa vào cờ này.
+        link_editor = event['share_access'] == 'link' and event['share_role'] == 'editor'
+        can_edit = is_owner or key_ok or (not stored_key) or link_editor
         return jsonify({
             'success': True,
             'event': {
@@ -452,6 +472,8 @@ def get_event(event_code):
                 'event_code': event['event_code'],
                 'title': event['title'],
                 'can_edit': can_edit,
+                'share_access': event['share_access'],
+                'share_role': event['share_role'],
                 'members': doc['members'],
                 'expenses': doc['expenses'],
                 'bankInfo': doc['bankInfo'],
@@ -698,6 +720,45 @@ def get_config():
     })
 
 
+@app.route('/api/events/<event_code>/sharing', methods=['PUT'])
+@limiter.limit('30 per minute; 300 per day')
+def update_sharing(event_code):
+    """Đổi quyền truy cập chung kiểu Google Docs.
+
+    Body: {access: 'restricted'|'link', role: 'viewer'|'editor'}.
+    Ai có quyền chỉnh sửa (owner / edit_key / link-editor) đều đổi được —
+    giống mặc định "người chỉnh sửa có thể chia sẻ" của Google Docs.
+    Không bump updated_at: đổi chia sẻ không phải sửa nội dung, tránh 409
+    vô cớ cho người đang lưu document."""
+    try:
+        body = request.get_json(silent=True) or {}
+        access = body.get('access')
+        role = body.get('role')
+        if access not in ('restricted', 'link') or role not in ('viewer', 'editor'):
+            return jsonify({'success': False, 'error': 'Cài đặt chia sẻ không hợp lệ.'}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        permission, event_id, _unused = _check_edit_permission(cursor, event_code)
+        if permission == 'not_found':
+            cursor.close()
+            return jsonify({'success': False, 'error': 'Event not found'}), 404
+        if permission == 'forbidden':
+            cursor.close()
+            return jsonify({'success': False, 'error': 'Bạn không có quyền thay đổi chia sẻ của sự kiện này.'}), 403
+
+        cursor.execute(
+            'UPDATE events SET share_access = %s, share_role = %s WHERE id = %s',
+            (access, role, event_id),
+        )
+        cursor.close()
+        return jsonify({'success': True, 'share_access': access, 'share_role': role})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return _server_error(e)
+
+
 @app.route('/api/events/<event_code>', methods=['DELETE'])
 @limiter.limit('10 per minute; 50 per day')
 def delete_event(event_code):
@@ -705,7 +766,10 @@ def delete_event(event_code):
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        permission, _event_id, _unused = _check_edit_permission(cursor, event_code)
+        # Xóa event: chỉ owner hoặc người cầm edit_key — vai trò "Người chỉnh
+        # sửa" qua link không được xóa (giống Google Docs).
+        permission, _event_id, _unused = _check_edit_permission(
+            cursor, event_code, allow_link_editor=False)
         if permission == 'not_found':
             cursor.close()
             return jsonify({'success': False, 'error': 'Event not found'}), 404

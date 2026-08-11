@@ -12,9 +12,18 @@ CREATE TABLE IF NOT EXISTS events (
     -- id user Supabase Auth; NULL = event legacy/migrate. Không FK sang auth.users
     -- để schema chạy được trên Postgres thường khi dev/test.
     owner_id   uuid,
+    -- Chia sẻ kiểu Google Docs: 'restricted' (chỉ owner/người có edit_key)
+    -- hoặc 'link' (bất kỳ ai có đường liên kết) với vai trò 'viewer'/'editor'.
+    -- Mặc định: ai có link đều xem được (đúng hành vi trước đây).
+    share_access text NOT NULL DEFAULT 'link',
+    share_role   text NOT NULL DEFAULT 'viewer',
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Migration an toàn cho DB đã deploy trước khi có cột chia sẻ (chạy lại vô hại)
+ALTER TABLE events ADD COLUMN IF NOT EXISTS share_access text NOT NULL DEFAULT 'link';
+ALTER TABLE events ADD COLUMN IF NOT EXISTS share_role   text NOT NULL DEFAULT 'viewer';
 
 CREATE TABLE IF NOT EXISTS members (
     id       uuid PRIMARY KEY DEFAULT gen_random_uuid(),

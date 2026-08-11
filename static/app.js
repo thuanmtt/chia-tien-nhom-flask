@@ -33,6 +33,9 @@
         let saveInFlight = false;
         let savePendingAgain = false;
         let lastKnownUpdatedAt = null;
+        // Chia sẻ kiểu Google Docs: 'restricted' | 'link' + vai trò 'viewer' | 'editor'
+        let shareAccess = 'link';
+        let shareRole = 'viewer';
 
         // Escape HTML để chống XSS khi render dữ liệu người dùng
         // (tên thành viên, tiêu đề chi phí, tên sự kiện, tên nhóm...)
@@ -501,6 +504,8 @@
             currentEventCode = null;
             lastKnownUpdatedAt = null;
             allowEdit = true; // sự kiện mới do chính mình tạo
+            shareAccess = 'link';   // mặc định: bất kỳ ai có đường liên kết
+            shareRole = 'viewer';   // với vai trò Người xem
             setSaveStatus('');
             $('#eventTitle').text('Sự Kiện Mới');
             $('#eventCodeDisplay').text('');
@@ -562,14 +567,30 @@
             return key;
         }
 
-        function buildShareLinks(eventCode) {
-            const base = window.location.origin + '/?event_code=' + encodeURIComponent(eventCode);
-            const key = getEditKey(eventCode);
-            return {
-                viewOnly: base,
-                // Sự kiện cũ chưa có khóa: chưa phân biệt được quyền → hai link như nhau
-                editable: key ? `${base}&key=${encodeURIComponent(key)}` : base,
-            };
+        // Link chia sẻ giờ chỉ có event_code (không kèm key) — server quyết
+        // quyền theo cài đặt chia sẻ kiểu Google Docs (shareAccess/shareRole).
+        // Link cũ dạng &key=... vẫn được server tôn trọng.
+        function buildShareLink(eventCode) {
+            return window.location.origin + '/?event_code=' + encodeURIComponent(eventCode);
+        }
+
+        function copyTextToClipboard(text, successMsg) {
+            function legacyCopy() {
+                // Input tạm phải nằm TRONG modal đang mở — focus-trap của
+                // Bootstrap giật focus khỏi phần tử ngoài modal làm copy hụt
+                const $host = $('.modal.show').last();
+                const $tmp = $('<input type="text">')
+                    .appendTo($host.length ? $host : $('body')).val(text);
+                $tmp[0].select();
+                document.execCommand('copy');
+                $tmp.remove();
+            }
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).catch(legacyCopy);
+            } else {
+                legacyCopy();
+            }
+            showToast(successMsg, 'success');
         }
         // ===== Hết phần khóa chỉnh sửa =====
 
@@ -746,6 +767,9 @@
 
                         // Mốc updated_at cho optimistic locking khi lưu
                         lastKnownUpdatedAt = eventData.updated_at || null;
+                        // Cài đặt chia sẻ hiện tại (cho modal Chia sẻ)
+                        shareAccess = eventData.share_access || 'link';
+                        shareRole = eventData.share_role || 'viewer';
                         setSaveStatus(''); // dữ liệu vừa tải, chưa có thay đổi cần lưu
 
                         // Cập nhật tên sự kiện
@@ -796,8 +820,13 @@
                         createNewEvent();
                     }
                 },
-                error: function() {
-                    showToast('Lỗi khi tải sự kiện!', 'error');
+                error: function(xhr) {
+                    if (xhr && xhr.status === 403) {
+                        // Chế độ "Hạn chế" — chỉ chủ sở hữu truy cập được
+                        showToast('Sự kiện đang ở chế độ hạn chế — chỉ chủ sở hữu mới truy cập được.', 'error');
+                    } else {
+                        showToast('Lỗi khi tải sự kiện!', 'error');
+                    }
                     createNewEvent();
                 }
             });
@@ -1563,6 +1592,8 @@
                     url: '/api/events/lookup',
                     method: 'POST',
                     contentType: 'application/json',
+                    // Kèm JWT: event ở chế độ "Hạn chế" chỉ hiện với chính owner
+                    headers: AppAuth.authHeaders(),
                     data: JSON.stringify({ codes: allCodes }),
                     success: function (response) {
                         const events = (response && response.events) || [];
@@ -2516,16 +2547,11 @@
             }, { okLabel: 'Xóa' });
         });
 
-        // Xử lý chia sẻ sự kiện từ danh sách
+        // Chia sẻ từ danh sách "Sự Kiện Của Tôi": copy thẳng link (cài đặt
+        // quyền chi tiết nằm trong nút Chia sẻ khi mở sự kiện)
         $(document).on('click', '.share-event-btn', function (e) {
             e.stopPropagation(); // Ngăn không cho sự kiện propagate lên parent
-            const eventCode = $(this).data('event-code');
-
-            // Link chỉnh sửa chứa khóa bí mật; link chỉ xem chỉ có event_code
-            const links = buildShareLinks(eventCode);
-            $('#shareLinkViewOnly').val(links.viewOnly);
-            $('#shareLinkEditable').val(links.editable);
-            $('#shareEventModal').modal('show');
+            copyTextToClipboard(buildShareLink($(this).data('event-code')), 'Đã sao chép đường liên kết!');
         });
 
         // Xử lý tạo sự kiện mới
@@ -2653,34 +2679,65 @@
                 });
         });
 
-        // Thêm handler cho nút share
+        // ===== Modal chia sẻ kiểu Google Docs =====
+        function renderShareModal() {
+            $('#shareEventTitle').text($('#eventTitle').text());
+            $('#shareAccessSelect').val(shareAccess);
+            $('#shareRoleSelect').val(shareRole).toggle(shareAccess === 'link');
+            if (shareAccess === 'restricted') {
+                $('#shareAccessIcon').attr('class', 'fas fa-lock text-secondary');
+                $('#shareAccessDesc').text('Chỉ chủ sở hữu mới truy cập được bằng đường liên kết này.');
+            } else {
+                $('#shareAccessIcon').attr('class', 'fas fa-globe-asia text-success');
+                $('#shareAccessDesc').text(shareRole === 'editor'
+                    ? 'Bất kỳ ai có kết nối Internet và có đường liên kết này đều có thể chỉnh sửa.'
+                    : 'Bất kỳ ai có kết nối Internet và có đường liên kết này đều có thể xem.');
+            }
+        }
+
+        function saveShareSettings(access, role) {
+            const prevAccess = shareAccess, prevRole = shareRole;
+            shareAccess = access;
+            shareRole = role;
+            renderShareModal();
+            $.ajax({
+                url: `/api/events/${currentEventCode}/sharing`,
+                method: 'PUT',
+                contentType: 'application/json',
+                headers: AppAuth.authHeaders({ 'X-Edit-Key': getOrCreateEditKey(currentEventCode) }),
+                data: JSON.stringify({ access: access, role: role }),
+                success: function () {
+                    showToast('Đã cập nhật quyền truy cập.', 'success');
+                },
+                error: function () {
+                    // Đổi thất bại → trả UI về trạng thái cũ
+                    shareAccess = prevAccess;
+                    shareRole = prevRole;
+                    renderShareModal();
+                    showToast('Không cập nhật được quyền truy cập, vui lòng thử lại.', 'error');
+                }
+            });
+        }
+
         $('#shareEventBtn').click(function () {
             if (!currentEventCode) {
                 showToast('Vui lòng lưu sự kiện trước khi chia sẻ!', 'warning');
                 return;
             }
-
-            // Link chỉnh sửa chứa khóa bí mật; link chỉ xem chỉ có event_code
-            const links = buildShareLinks(currentEventCode);
-            $('#shareLinkViewOnly').val(links.viewOnly);
-            $('#shareLinkEditable').val(links.editable);
+            renderShareModal();
             $('#shareEventModal').modal('show');
         });
 
-        // Xử lý copy link chỉ xem
-        $('#copyShareLinkViewOnlyBtn').click(function () {
-            const shareLink = $('#shareLinkViewOnly');
-            shareLink.select();
-            document.execCommand('copy');
-            showToast('Đã sao chép link chỉ xem thành công!', 'success');
+        $('#shareAccessSelect').change(function () {
+            saveShareSettings($(this).val(), shareRole);
         });
 
-        // Xử lý copy link có thể chỉnh sửa
-        $('#copyShareLinkEditableBtn').click(function () {
-            const shareLink = $('#shareLinkEditable');
-            shareLink.select();
-            document.execCommand('copy');
-            showToast('Đã sao chép link có thể chỉnh sửa thành công!', 'success');
+        $('#shareRoleSelect').change(function () {
+            saveShareSettings(shareAccess, $(this).val());
+        });
+
+        $('#copyShareLinkBtn').click(function () {
+            copyTextToClipboard(buildShareLink(currentEventCode), 'Đã sao chép đường liên kết!');
         });
 
         function exitEditExpenseMode() {

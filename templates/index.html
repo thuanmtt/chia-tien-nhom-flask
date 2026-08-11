@@ -367,45 +367,37 @@
 
 <div class="toast-container position-fixed top-0 end-0 p-3" id="toastContainer"></div>
 
-<!-- Modal Chia Sẻ Sự Kiện -->
+<!-- Modal Chia Sẻ Sự Kiện (kiểu Google Docs: quyền truy cập chung + vai trò) -->
 <div class="modal fade" id="shareEventModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Chia Sẻ Sự Kiện</h5>
+                <h5 class="modal-title">Chia sẻ "<span id="shareEventTitle"></span>"</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <p>Sử dụng đường link dưới đây để chia sẻ thông tin sự kiện:</p>
-                
-                <div class="mb-3">
-                    <label class="form-label"><strong>Link chỉ xem (ẩn các nút chỉnh sửa):</strong></label>
-                    <div class="input-group">
-                        <input type="text" class="form-control" id="shareLinkViewOnly" readonly>
-                        <button class="btn btn-primary" id="copyShareLinkViewOnlyBtn">
-                            <i class="fas fa-copy me-1"></i> Copy
-                        </button>
-                    </div>
+                <label class="form-label fw-semibold">Quyền truy cập chung</label>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="d-inline-flex align-items-center justify-content-center rounded-circle bg-light"
+                          style="width: 40px; height: 40px; flex: 0 0 40px;">
+                        <i id="shareAccessIcon" class="fas fa-globe-asia text-success"></i>
+                    </span>
+                    <select class="form-select w-auto" id="shareAccessSelect">
+                        <option value="restricted">Hạn chế</option>
+                        <option value="link">Bất kỳ ai có đường liên kết</option>
+                    </select>
+                    <select class="form-select w-auto ms-auto" id="shareRoleSelect">
+                        <option value="viewer">Người xem</option>
+                        <option value="editor">Người chỉnh sửa</option>
+                    </select>
                 </div>
-                
-                <div class="mb-3">
-                    <label class="form-label"><strong>Link có thể chỉnh sửa:</strong></label>
-                    <div class="input-group">
-                        <input type="text" class="form-control" id="shareLinkEditable" readonly>
-                        <button class="btn btn-primary" id="copyShareLinkEditableBtn">
-                            <i class="fas fa-copy me-1"></i> Copy
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="alert alert-info mt-3">
-                    <i class="fas fa-info-circle me-2"></i> 
-                    <strong>Link chỉ xem:</strong> Người nhận chỉ có thể xem thông tin, không thể chỉnh sửa.<br>
-                    <strong>Link có thể chỉnh sửa:</strong> Người nhận có thể chỉnh sửa và lưu thay đổi.
-                </div>
+                <div class="form-text mt-2 ms-5 ps-2" id="shareAccessDesc"></div>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+            <div class="modal-footer justify-content-between">
+                <button type="button" class="btn btn-outline-primary rounded-pill" id="copyShareLinkBtn">
+                    <i class="fas fa-link me-1"></i> Sao chép đường liên kết
+                </button>
+                <button type="button" class="btn btn-primary rounded-pill px-4" data-bs-dismiss="modal">Xong</button>
             </div>
         </div>
     </div>
