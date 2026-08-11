@@ -611,8 +611,8 @@
                 <div id="authPaneLogin">
                     <form id="authLoginForm">
                         <div class="mb-2">
-                            <label class="form-label" for="authLoginEmail">Email</label>
-                            <input type="email" class="form-control" id="authLoginEmail" autocomplete="email">
+                            <label class="form-label" for="authLoginEmail">Email hoặc username</label>
+                            <input type="text" class="form-control" id="authLoginEmail" autocomplete="username">
                         </div>
                         <div class="mb-3">
                             <label class="form-label" for="authLoginPassword">Mật khẩu</label>
@@ -660,6 +660,67 @@
 
 <!-- Modal Xác Nhận (dùng chung thay cho confirm() native).
      Phải đứng SAU các modal khác trong DOM để hiện đè lên khi mở lồng nhau. -->
+<!-- Modal tài khoản: username (đăng nhập thay email) + đặt/đổi mật khẩu -->
+<div class="modal fade" id="accountModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-user-cog me-2"></i>Tài Khoản</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="accountMessage" class="small mb-2"></div>
+
+                <form id="accountUsernameForm" class="mb-4">
+                    <label class="form-label fw-semibold" for="accountUsername">Username</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="accountUsername"
+                               placeholder="vd: thuan.mai" autocomplete="username" maxlength="30">
+                        <button type="submit" class="btn btn-primary">Lưu</button>
+                    </div>
+                    <div class="form-text">3-30 ký tự a-z, 0-9, dấu chấm, gạch dưới, gạch ngang —
+                        dùng thay email khi đăng nhập. Để trống rồi bấm Lưu để xóa.</div>
+                </form>
+
+                <form id="accountPasswordForm">
+                    <label class="form-label fw-semibold">Mật khẩu</label>
+                    <p class="form-text mt-0 d-none" id="accountNoPasswordNote">Tài khoản của bạn
+                        (đăng nhập Google) chưa có mật khẩu — đặt mật khẩu để đăng nhập được bằng
+                        email/username.</p>
+                    <div class="mb-2" id="accountOldPasswordGroup">
+                        <label class="form-label" for="accountOldPassword">Mật khẩu cũ</label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="accountOldPassword"
+                                   autocomplete="current-password">
+                            <button type="button" class="btn btn-outline-secondary toggle-password"
+                                    data-target="#accountOldPassword" tabindex="-1"><i class="fas fa-eye"></i></button>
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="accountNewPassword">Mật khẩu mới (tối thiểu 6 ký tự)</label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="accountNewPassword"
+                                   autocomplete="new-password">
+                            <button type="button" class="btn btn-outline-secondary toggle-password"
+                                    data-target="#accountNewPassword" tabindex="-1"><i class="fas fa-eye"></i></button>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="accountConfirmPassword">Nhập lại mật khẩu mới</label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="accountConfirmPassword"
+                                   autocomplete="new-password">
+                            <button type="button" class="btn btn-outline-secondary toggle-password"
+                                    data-target="#accountConfirmPassword" tabindex="-1"><i class="fas fa-eye"></i></button>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Lưu mật khẩu</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="confirmModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">

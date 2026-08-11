@@ -80,6 +80,15 @@ CREATE TABLE IF NOT EXISTS event_rates (
     PRIMARY KEY (event_id, currency_code)
 );
 
+-- Hồ sơ người dùng: username (duy nhất, lowercase) dùng thay email khi đăng
+-- nhập. Không FK sang auth.users (giống owner_id) để chạy được trên Postgres
+-- thường; user_id là id của Supabase Auth.
+CREATE TABLE IF NOT EXISTS user_profiles (
+    user_id    uuid PRIMARY KEY,
+    username   text UNIQUE,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_events_event_code ON events (event_code);
 CREATE INDEX IF NOT EXISTS idx_events_owner_id   ON events (owner_id);
 CREATE INDEX IF NOT EXISTS idx_events_updated_at ON events (updated_at DESC);
@@ -100,3 +109,4 @@ ALTER TABLE member_bank_info      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE couples               ENABLE ROW LEVEL SECURITY;
 ALTER TABLE couple_members        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE event_rates           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_profiles         ENABLE ROW LEVEL SECURITY;

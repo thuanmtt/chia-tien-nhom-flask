@@ -45,10 +45,8 @@
             const $menu = $('<ul class="dropdown-menu dropdown-menu-end"></ul>');
             $menu.append($('<li></li>').append($('<h6 class="dropdown-header"></h6>').text(email)));
             $menu.append('<li><hr class="dropdown-divider"></li>');
-            // Đặt/đổi mật khẩu qua updateUser — quan trọng cho tài khoản tạo bằng
-            // Google (chưa có mật khẩu): đặt xong thì đăng nhập được cả 2 kiểu
-            $menu.append('<li><button type="button" class="dropdown-item" id="changePasswordBtn">'
-                + '<i class="fas fa-key me-1"></i>Đặt / đổi mật khẩu</button></li>');
+            $menu.append('<li><button type="button" class="dropdown-item" id="accountBtn">'
+                + '<i class="fas fa-user-cog me-1"></i>Tài khoản</button></li>');
             $menu.append('<li><button type="button" class="dropdown-item" id="logoutBtn">'
                 + '<i class="fas fa-sign-out-alt me-1"></i>Đăng xuất</button></li>');
             $area.append($toggle).append($menu);
@@ -135,12 +133,91 @@
         if (client) await client.auth.signOut();
     });
 
-    // Đặt/đổi mật khẩu khi đang đăng nhập — mở pane recovery (form gọi
-    // updateUser, hoạt động cho cả tài khoản Google chưa từng có mật khẩu)
-    $(document).on('click', '#changePasswordBtn', function () {
+    // ===== Modal Tài Khoản: username + đặt/đổi mật khẩu =====
+    // hasPassword: tài khoản đã có identity 'email' (đặt mật khẩu xong GoTrue
+    // thêm identity này — đã kiểm chứng thực tế). Chưa có → ẩn ô mật khẩu cũ.
+    let hasPassword = false;
+
+    function setAccountMessage(msg, isError) {
+        $('#accountMessage')
+            .attr('class', 'small mb-2 ' + (isError ? 'text-danger' : 'text-success'))
+            .text(msg || '');
+    }
+
+    async function openAccountModal() {
         if (!client || !session) return;
-        showPane('recovery');
-        $('#authModal').modal('show');
+        setAccountMessage('');
+        $('#accountOldPassword, #accountNewPassword, #accountConfirmPassword').val('');
+        hasPassword = false;
+        try {
+            const res = await client.auth.getUser();
+            const identities = (res.data && res.data.user && res.data.user.identities) || [];
+            hasPassword = identities.some(function (i) { return i.provider === 'email'; });
+        } catch (e) { /* coi như chưa có mật khẩu */ }
+        $('#accountOldPasswordGroup').toggleClass('d-none', !hasPassword);
+        $('#accountNoPasswordNote').toggleClass('d-none', hasPassword);
+        $('#accountUsername').val('');
+        $.ajax({ url: '/api/profile', headers: authHeaders() })
+            .done(function (r) { if (r && r.username) $('#accountUsername').val(r.username); });
+        $('#accountModal').modal('show');
+    }
+
+    $(document).on('click', '#accountBtn', openAccountModal);
+
+    // Nút 👁 hiện/ẩn mật khẩu (dùng chung cho mọi ô trong modal Tài Khoản)
+    $(document).on('click', '.toggle-password', function () {
+        const $input = $($(this).data('target'));
+        const show = $input.attr('type') === 'password';
+        $input.attr('type', show ? 'text' : 'password');
+        $(this).find('i').attr('class', show ? 'fas fa-eye-slash' : 'fas fa-eye');
+    });
+
+    $(document).on('submit', '#accountUsernameForm', function (e) {
+        e.preventDefault();
+        $.ajax({
+            url: '/api/profile',
+            method: 'PUT',
+            contentType: 'application/json',
+            headers: authHeaders(),
+            data: JSON.stringify({ username: $('#accountUsername').val() })
+        }).done(function (r) {
+            if (r.username) {
+                $('#accountUsername').val(r.username);
+                setAccountMessage('Đã lưu username "' + r.username + '" — dùng được thay email khi đăng nhập.');
+            } else {
+                setAccountMessage('Đã xóa username.');
+            }
+        }).fail(function (xhr) {
+            const err = xhr.responseJSON && xhr.responseJSON.error;
+            setAccountMessage(err || 'Không lưu được username, vui lòng thử lại.', true);
+        });
+    });
+
+    $(document).on('submit', '#accountPasswordForm', async function (e) {
+        e.preventDefault();
+        const oldPass = $('#accountOldPassword').val();
+        const newPass = $('#accountNewPassword').val();
+        const confirmPass = $('#accountConfirmPassword').val();
+        if (newPass.length < 6) { setAccountMessage('Mật khẩu mới tối thiểu 6 ký tự.', true); return; }
+        if (newPass !== confirmPass) { setAccountMessage('Mật khẩu nhập lại không khớp.', true); return; }
+        if (hasPassword) {
+            if (!oldPass) { setAccountMessage('Vui lòng nhập mật khẩu cũ.', true); return; }
+            // GoTrue không kiểm tra mật khẩu cũ trong updateUser → tự xác minh
+            // bằng một lần đăng nhập (thành công thì session được thay mới, vô hại)
+            const check = await client.auth.signInWithPassword({ email: userEmail(), password: oldPass });
+            if (check.error) { setAccountMessage('Mật khẩu cũ không đúng.', true); return; }
+        }
+        const res = await client.auth.updateUser({ password: newPass });
+        if (res.error) {
+            // Hiện lỗi thật từ Supabase — không nuốt message như bản cũ
+            setAccountMessage('Không đổi được mật khẩu: ' + (res.error.message || 'lỗi không xác định.'), true);
+            return;
+        }
+        hasPassword = true;
+        $('#accountOldPasswordGroup').removeClass('d-none');
+        $('#accountNoPasswordNote').addClass('d-none');
+        $('#accountOldPassword, #accountNewPassword, #accountConfirmPassword').val('');
+        setAccountMessage('Đã lưu mật khẩu — bạn có thể đăng nhập bằng email/username + mật khẩu.');
     });
 
     $(document).on('click', '#authShowRegister', function () { showPane('register'); });
@@ -148,12 +225,39 @@
 
     $(document).on('submit', '#authLoginForm', async function (e) {
         e.preventDefault();
-        const email = $('#authLoginEmail').val().trim();
+        const identifier = $('#authLoginEmail').val().trim();
         const password = $('#authLoginPassword').val();
-        if (!email || !password) { setAuthMessage('Vui lòng nhập email và mật khẩu.', true); return; }
-        const res = await client.auth.signInWithPassword({ email: email, password: password });
-        if (res.error) { setAuthMessage('Đăng nhập thất bại — email hoặc mật khẩu không đúng.', true); return; }
-        $('#authModal').modal('hide');
+        if (!identifier || !password) { setAuthMessage('Vui lòng nhập email/username và mật khẩu.', true); return; }
+
+        if (identifier.indexOf('@') !== -1) {
+            // Email: đăng nhập thẳng với Supabase
+            const res = await client.auth.signInWithPassword({ email: identifier, password: password });
+            if (res.error) { setAuthMessage('Đăng nhập thất bại — email hoặc mật khẩu không đúng.', true); return; }
+            $('#authModal').modal('hide');
+            return;
+        }
+
+        // Username: backend tra email rồi đổi lấy session (không lộ email người khác)
+        try {
+            const resp = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ identifier: identifier, password: password })
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.success || !data.session) {
+                setAuthMessage((data && data.error) || 'Đăng nhập thất bại, vui lòng thử lại.', true);
+                return;
+            }
+            const set = await client.auth.setSession({
+                access_token: data.session.access_token,
+                refresh_token: data.session.refresh_token
+            });
+            if (set.error) { setAuthMessage('Đăng nhập thất bại, vui lòng thử lại.', true); return; }
+            $('#authModal').modal('hide');
+        } catch (err) {
+            setAuthMessage('Lỗi mạng khi đăng nhập, vui lòng thử lại.', true);
+        }
     });
 
     $(document).on('submit', '#authRegisterForm', async function (e) {
@@ -176,7 +280,7 @@
             // Email đã có tài khoản: Supabase trả "thành công giả" (không gửi mail,
             // identities rỗng) để chống dò email — báo đúng thay vì bảo chờ mail
             setAuthMessage('Email này đã có tài khoản — hãy bấm "Đã có tài khoản? Đăng nhập" (hoặc dùng nút Google). '
-                + 'Nếu tài khoản tạo bằng Google và bạn muốn có mật khẩu: đăng nhập Google rồi vào menu tài khoản → "Đặt / đổi mật khẩu".', true);
+                + 'Nếu tài khoản tạo bằng Google và bạn muốn có mật khẩu: đăng nhập Google rồi vào menu "Tài khoản" để đặt mật khẩu.', true);
             return;
         }
         setAuthMessage('Đăng ký thành công! Vui lòng kiểm tra email để xác nhận tài khoản.');

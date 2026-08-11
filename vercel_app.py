@@ -5,6 +5,7 @@ import psycopg2
 import psycopg2.extras
 import os
 import json
+import re
 import secrets
 import string
 from datetime import datetime
@@ -276,6 +277,141 @@ def my_events():
                 'updated_at': r['updated_at'].isoformat() if r['updated_at'] else None,
             } for r in rows
         ]})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return _server_error(e)
+
+
+# Username: 3-30 ký tự a-z 0-9 . _ - ; bắt đầu/kết thúc bằng chữ hoặc số
+_USERNAME_RE = re.compile(r'^[a-z0-9](?:[a-z0-9._-]{1,28}[a-z0-9])?$')
+_USERNAME_ERROR = ('Username 3-30 ký tự, chỉ gồm a-z, 0-9, dấu chấm, gạch dưới, '
+                   'gạch ngang; bắt đầu và kết thúc bằng chữ hoặc số.')
+
+
+@app.route('/api/profile', methods=['GET'])
+@limiter.limit('60 per minute')
+def get_profile():
+    """Hồ sơ của tài khoản đang đăng nhập (hiện chỉ có username)."""
+    try:
+        user_id = request_user_id(request)
+        if not user_id:
+            return jsonify({'success': False, 'error': 'Vui lòng đăng nhập.'}), 401
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT username FROM user_profiles WHERE user_id = %s::uuid', (user_id,))
+        row = cursor.fetchone()
+        cursor.close()
+        return jsonify({'success': True, 'username': row[0] if row else None})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return _server_error(e)
+
+
+@app.route('/api/profile', methods=['PUT'])
+@limiter.limit('10 per minute; 100 per day')
+def update_profile():
+    """Đặt/đổi/xóa username. Username duy nhất toàn hệ thống, lưu lowercase."""
+    try:
+        user_id = request_user_id(request)
+        if not user_id:
+            return jsonify({'success': False, 'error': 'Vui lòng đăng nhập.'}), 401
+        body = request.get_json(silent=True)
+        raw = (body or {}).get('username')
+        if raw is None:
+            raw = ''
+        if not isinstance(raw, str) or len(raw) > 100:
+            return jsonify({'success': False, 'error': _USERNAME_ERROR}), 400
+        username = raw.strip().lower()
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        if not username:
+            # Để trống = xóa username
+            cursor.execute('DELETE FROM user_profiles WHERE user_id = %s::uuid', (user_id,))
+            cursor.close()
+            return jsonify({'success': True, 'username': None})
+        if '@' in username or not _USERNAME_RE.match(username):
+            cursor.close()
+            return jsonify({'success': False, 'error': _USERNAME_ERROR}), 400
+        try:
+            cursor.execute(
+                '''INSERT INTO user_profiles (user_id, username, updated_at)
+                   VALUES (%s::uuid, %s, now())
+                   ON CONFLICT (user_id) DO UPDATE
+                   SET username = EXCLUDED.username, updated_at = now()''',
+                (user_id, username),
+            )
+        except psycopg2.errors.UniqueViolation:
+            cursor.close()
+            return jsonify({'success': False, 'error': 'Username này đã có người dùng, vui lòng chọn tên khác.'}), 409
+        cursor.close()
+        return jsonify({'success': True, 'username': username})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return _server_error(e)
+
+
+def _gotrue_password_grant(email, password):
+    """Đổi email + mật khẩu lấy session qua GoTrue (server-side, dùng anon key).
+    Trả về (status_code, dict)."""
+    url = f"{os.environ.get('SUPABASE_URL', '').rstrip('/')}/auth/v1/token?grant_type=password"
+    req = Request(
+        url, method='POST',
+        data=json.dumps({'email': email, 'password': password}).encode(),
+        headers={'Content-Type': 'application/json',
+                 'apikey': os.environ.get('SUPABASE_ANON_KEY', '')},
+    )
+    try:
+        with urlopen(req, timeout=10) as resp:
+            return resp.status, json.loads(resp.read().decode())
+    except HTTPError as e:
+        try:
+            return e.code, json.loads(e.read().decode())
+        except Exception:
+            return e.code, {}
+
+
+@app.route('/api/auth/login', methods=['POST'])
+@limiter.limit('10 per minute; 100 per day')
+def login_alias():
+    """Đăng nhập bằng username HOẶC email + mật khẩu.
+
+    Backend tra email từ username (bảng user_profiles JOIN auth.users) rồi đổi
+    lấy session — mọi thất bại đều trả cùng một message để không lộ username
+    nào tồn tại / email của người khác."""
+    try:
+        body = request.get_json(silent=True)
+        identifier = (body or {}).get('identifier')
+        password = (body or {}).get('password')
+        if (not isinstance(identifier, str) or not isinstance(password, str)
+                or not identifier.strip() or not password
+                or len(identifier) > 254 or len(password) > 200):
+            return jsonify({'success': False, 'error': 'Vui lòng nhập tên đăng nhập và mật khẩu.'}), 400
+        identifier = identifier.strip()
+
+        email = identifier
+        if '@' not in identifier:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                '''SELECT u.email FROM user_profiles p
+                   JOIN auth.users u ON u.id = p.user_id
+                   WHERE p.username = %s''',
+                (identifier.lower(),),
+            )
+            row = cursor.fetchone()
+            cursor.close()
+            if not row or not row[0]:
+                return jsonify({'success': False, 'error': 'Sai tên đăng nhập hoặc mật khẩu.'}), 401
+            email = row[0]
+
+        status, data = _gotrue_password_grant(email, password)
+        if status != 200 or not data.get('access_token'):
+            return jsonify({'success': False, 'error': 'Sai tên đăng nhập hoặc mật khẩu.'}), 401
+        return jsonify({'success': True, 'session': data})
     except HTTPException:
         raise
     except Exception as e:
