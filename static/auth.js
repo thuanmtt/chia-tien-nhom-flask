@@ -120,7 +120,19 @@
             return;
         }
         const res = await client.auth.signUp({ email: email, password: password });
-        if (res.error) { setAuthMessage('Đăng ký thất bại — email có thể đã được dùng.', true); return; }
+        if (res.error) { setAuthMessage('Đăng ký thất bại — vui lòng thử lại.', true); return; }
+        if (res.data && res.data.session) {
+            // Project tắt "Confirm email" — có session ngay, đăng nhập tức thì
+            $('#authModal').modal('hide');
+            return;
+        }
+        const user = res.data && res.data.user;
+        if (user && Array.isArray(user.identities) && user.identities.length === 0) {
+            // Email đã có tài khoản: Supabase trả "thành công giả" (không gửi mail,
+            // identities rỗng) để chống dò email — báo đúng thay vì bảo chờ mail
+            setAuthMessage('Email này đã có tài khoản — hãy bấm "Đã có tài khoản? Đăng nhập" (hoặc dùng nút Google).', true);
+            return;
+        }
         setAuthMessage('Đăng ký thành công! Vui lòng kiểm tra email để xác nhận tài khoản.');
     });
 
