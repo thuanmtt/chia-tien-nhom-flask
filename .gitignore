@@ -207,3 +207,5 @@ __marimo__/
 .gitignore
 .env.vercel
 .claude
+.vercel
+.env*
