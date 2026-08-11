@@ -45,6 +45,10 @@
             const $menu = $('<ul class="dropdown-menu dropdown-menu-end"></ul>');
             $menu.append($('<li></li>').append($('<h6 class="dropdown-header"></h6>').text(email)));
             $menu.append('<li><hr class="dropdown-divider"></li>');
+            // Đặt/đổi mật khẩu qua updateUser — quan trọng cho tài khoản tạo bằng
+            // Google (chưa có mật khẩu): đặt xong thì đăng nhập được cả 2 kiểu
+            $menu.append('<li><button type="button" class="dropdown-item" id="changePasswordBtn">'
+                + '<i class="fas fa-key me-1"></i>Đặt / đổi mật khẩu</button></li>');
             $menu.append('<li><button type="button" class="dropdown-item" id="logoutBtn">'
                 + '<i class="fas fa-sign-out-alt me-1"></i>Đăng xuất</button></li>');
             $area.append($toggle).append($menu);
@@ -131,6 +135,14 @@
         if (client) await client.auth.signOut();
     });
 
+    // Đặt/đổi mật khẩu khi đang đăng nhập — mở pane recovery (form gọi
+    // updateUser, hoạt động cho cả tài khoản Google chưa từng có mật khẩu)
+    $(document).on('click', '#changePasswordBtn', function () {
+        if (!client || !session) return;
+        showPane('recovery');
+        $('#authModal').modal('show');
+    });
+
     $(document).on('click', '#authShowRegister', function () { showPane('register'); });
     $(document).on('click', '#authShowLogin', function () { showPane('login'); });
 
@@ -163,7 +175,8 @@
         if (user && Array.isArray(user.identities) && user.identities.length === 0) {
             // Email đã có tài khoản: Supabase trả "thành công giả" (không gửi mail,
             // identities rỗng) để chống dò email — báo đúng thay vì bảo chờ mail
-            setAuthMessage('Email này đã có tài khoản — hãy bấm "Đã có tài khoản? Đăng nhập" (hoặc dùng nút Google).', true);
+            setAuthMessage('Email này đã có tài khoản — hãy bấm "Đã có tài khoản? Đăng nhập" (hoặc dùng nút Google). '
+                + 'Nếu tài khoản tạo bằng Google và bạn muốn có mật khẩu: đăng nhập Google rồi vào menu tài khoản → "Đặt / đổi mật khẩu".', true);
             return;
         }
         setAuthMessage('Đăng ký thành công! Vui lòng kiểm tra email để xác nhận tài khoản.');
