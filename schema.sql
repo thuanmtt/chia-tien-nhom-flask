@@ -1,22 +1,102 @@
--- Run this once against your Vercel/Neon Postgres database.
+-- Schema quan hệ (v2) cho Supabase Postgres. Idempotent — chạy lại nhiều lần không sao:
+--   psql "$DATABASE_URL" -f schema.sql
+-- KHÔNG chạy file này lên DB cũ (Neon) — DB cũ giữ nguyên để migrate_to_supabase.py đọc.
+-- Thành viên được định danh bằng TÊN trong toàn bộ document model, nên các bảng con
+-- tham chiếu member_name (text) thay vì FK id — giữ đúng ngữ nghĩa client hiện tại.
+
 CREATE TABLE IF NOT EXISTS events (
-    id TEXT PRIMARY KEY,
-    event_code TEXT UNIQUE NOT NULL,
-    title TEXT NOT NULL,
-    members TEXT NOT NULL,
-    expenses TEXT NOT NULL,
-    bank_info TEXT,
-    couples TEXT NOT NULL DEFAULT '[]',
-    rates TEXT NOT NULL DEFAULT '{}',
-    edit_key TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_code text UNIQUE NOT NULL,
+    title      text NOT NULL,
+    edit_key   text,
+    -- id user Supabase Auth; NULL = event legacy/migrate. Không FK sang auth.users
+    -- để schema chạy được trên Postgres thường khi dev/test.
+    owner_id   uuid,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS members (
+    id       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id uuid NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    name     text NOT NULL,
+    position int  NOT NULL,
+    UNIQUE (event_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS expenses (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id     uuid NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    title        text NOT NULL DEFAULT '',
+    amount       numeric NOT NULL DEFAULT 0,
+    currency     text NOT NULL DEFAULT 'VND',
+    payer_name   text NOT NULL DEFAULT '',
+    benefit_type text NOT NULL DEFAULT 'all',
+    expense_date text NOT NULL DEFAULT '',
+    created_time text NOT NULL DEFAULT '',
+    updated_time text NOT NULL DEFAULT '',
+    position     int  NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS expense_beneficiaries (
+    expense_id  uuid NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
+    member_name text NOT NULL,
+    position    int  NOT NULL,
+    PRIMARY KEY (expense_id, member_name)
+);
+
+CREATE TABLE IF NOT EXISTS member_bank_info (
+    event_id    uuid NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    member_name text NOT NULL,
+    bank        text NOT NULL DEFAULT '',
+    account     text NOT NULL DEFAULT '',
+    PRIMARY KEY (event_id, member_name)
+);
+
+CREATE TABLE IF NOT EXISTS couples (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id     uuid NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    client_id    text NOT NULL DEFAULT '',
+    label        text NOT NULL DEFAULT '',
+    primary_name text NOT NULL DEFAULT '',
+    position     int  NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS couple_members (
+    couple_id   uuid NOT NULL REFERENCES couples(id) ON DELETE CASCADE,
+    member_name text NOT NULL,
+    position    int  NOT NULL,
+    PRIMARY KEY (couple_id, member_name)
+);
+
+CREATE TABLE IF NOT EXISTS event_rates (
+    event_id      uuid NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    currency_code text NOT NULL,
+    rate          numeric,            -- NULL = thiếu tỷ giá (client hiện cảnh báo)
+    source        text NOT NULL DEFAULT '',
+    rate_date     text,
+    rate_type     text,
+    currency_name text NOT NULL DEFAULT '',
+    PRIMARY KEY (event_id, currency_code)
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_event_code ON events (event_code);
+CREATE INDEX IF NOT EXISTS idx_events_owner_id   ON events (owner_id);
 CREATE INDEX IF NOT EXISTS idx_events_updated_at ON events (updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_members_event_id          ON members (event_id);
+CREATE INDEX IF NOT EXISTS idx_expenses_event_id         ON expenses (event_id);
+CREATE INDEX IF NOT EXISTS idx_member_bank_info_event_id ON member_bank_info (event_id);
+CREATE INDEX IF NOT EXISTS idx_couples_event_id          ON couples (event_id);
+CREATE INDEX IF NOT EXISTS idx_event_rates_event_id      ON event_rates (event_id);
 
--- Migration an toàn cho DB đã deploy (chạy lại nhiều lần không sao):
-ALTER TABLE events ADD COLUMN IF NOT EXISTS couples TEXT NOT NULL DEFAULT '[]';
-ALTER TABLE events ADD COLUMN IF NOT EXISTS rates TEXT NOT NULL DEFAULT '{}';
-ALTER TABLE events ADD COLUMN IF NOT EXISTS edit_key TEXT;
+-- Supabase expose PostgREST công khai với anon key → bật RLS, KHÔNG tạo policy
+-- (deny-all cho anon/authenticated). Flask kết nối bằng role postgres (owner của
+-- bảng) nên không bị chặn.
+ALTER TABLE events                ENABLE ROW LEVEL SECURITY;
+ALTER TABLE members               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE expenses              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE expense_beneficiaries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE member_bank_info      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE couples               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE couple_members        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE event_rates           ENABLE ROW LEVEL SECURITY;

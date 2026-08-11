@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v4';
 const STATIC_CACHE = `chia-tien-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `chia-tien-runtime-${CACHE_VERSION}`;
 
@@ -8,6 +8,7 @@ const PRECACHE_URLS = [
   '/static/app.css',
   '/static/app.js',
   '/static/split.js',
+  '/static/auth.js',
   '/static/icons/icon.svg',
   '/static/icons/icon-192.png',
   '/static/icons/icon-512.png',
@@ -22,7 +23,8 @@ const PRECACHE_URLS = [
 const NETWORK_FIRST_PATHS = new Set([
   '/static/app.css',
   '/static/app.js',
-  '/static/split.js'
+  '/static/split.js',
+  '/static/auth.js'
 ]);
 
 self.addEventListener('install', (event) => {

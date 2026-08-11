@@ -8,13 +8,14 @@ import json
 import secrets
 import string
 from datetime import datetime
-import uuid
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 from werkzeug.exceptions import HTTPException
 
 from validation import ValidationError, validate_event_payload
+from event_store import replace_event_children, load_event_children, load_events_summary
+from supabase_auth import request_user_id
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -72,23 +73,33 @@ def _provided_edit_key():
 def _check_edit_permission(cursor, event_code):
     """Kiểm tra quyền sửa/xóa event.
 
-    Trả về ('not_found' | 'forbidden' | 'ok', updated_at hiện tại của event).
+    Trả về (status, event_id, updated_at) với status: 'not_found' | 'forbidden' | 'ok'.
+    Quyền hợp lệ khi: là owner (JWT Supabase) HOẶC X-Edit-Key khớp.
     Event cũ chưa có edit_key: chấp nhận request và "nhận" key client gửi lên
     (nếu có) làm key chính thức, để dữ liệu cũ không bị khóa ngoài ý muốn.
     """
-    cursor.execute('SELECT edit_key, updated_at FROM events WHERE event_code = %s', (event_code,))
+    cursor.execute(
+        'SELECT id, edit_key, owner_id, updated_at FROM events WHERE event_code = %s',
+        (event_code,),
+    )
     row = cursor.fetchone()
     if row is None:
-        return 'not_found', None
-    stored, updated_at = row[0], row[1]
+        return 'not_found', None, None
+    event_id, stored, owner_id, updated_at = row[0], row[1], row[2], row[3]
+
+    # Owner đăng nhập có toàn quyền — kể cả khi client gửi kèm key sai/tự sinh
+    user_id = request_user_id(request)
+    if owner_id and user_id and str(owner_id) == user_id:
+        return 'ok', event_id, updated_at
+
     provided = _provided_edit_key()
     if stored:
         if not provided or not hmac.compare_digest(stored, provided):
-            return 'forbidden', updated_at
-        return 'ok', updated_at
+            return 'forbidden', event_id, updated_at
+        return 'ok', event_id, updated_at
     if provided:
-        cursor.execute('UPDATE events SET edit_key = %s WHERE event_code = %s', (provided, event_code))
-    return 'ok', updated_at
+        cursor.execute('UPDATE events SET edit_key = %s WHERE id = %s', (provided, event_id))
+    return 'ok', event_id, updated_at
 
 
 def _database_url():
@@ -152,46 +163,50 @@ def manifest():
 @limiter.limit('10 per minute; 100 per day')
 def create_event():
     try:
+        # Tạo sự kiện yêu cầu đăng nhập (401 ≠ 403: chưa đăng nhập vs không có quyền)
+        user_id = request_user_id(request)
+        if not user_id:
+            return jsonify({'success': False, 'error': 'Vui lòng đăng nhập để tạo sự kiện.'}), 401
+
         try:
             data = validate_event_payload(request.get_json(silent=True))
         except ValidationError as e:
             return jsonify({'success': False, 'error': str(e)}), 400
 
         event_code = generate_event_code()
-        event_id = str(uuid.uuid4())
         # Khóa chỉnh sửa — chỉ trả về 1 lần khi tạo
         edit_key = secrets.token_urlsafe(24)
 
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute(
-            '''
-            INSERT INTO events (id, event_code, title, members, expenses, bank_info, couples, rates, edit_key)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING updated_at
-            ''',
-            (
-                event_id,
-                event_code,
-                data['title'],
-                json.dumps(data['members']),
-                json.dumps(data['expenses']),
-                json.dumps(data['bankInfo']),
-                json.dumps(data['couples']),
-                json.dumps(data['rates']),
-                edit_key,
-            ),
-        )
-        new_row = cursor.fetchone()
-        cursor.close()
-        created_updated_at = new_row[0].isoformat() if new_row and new_row[0] else None
+        # Ghi nhiều bảng phải nằm trong 1 transaction (connection đang autocommit
+        # nên mở transaction thủ công bằng BEGIN/COMMIT)
+        try:
+            cursor.execute('BEGIN')
+            cursor.execute(
+                '''INSERT INTO events (event_code, title, edit_key, owner_id)
+                   VALUES (%s, %s, %s, %s) RETURNING id, updated_at''',
+                (event_code, data['title'], edit_key, user_id),
+            )
+            event_id, created_updated_at = cursor.fetchone()
+            replace_event_children(cursor, event_id, data)
+            cursor.execute('COMMIT')
+        except Exception:
+            try:
+                cursor.execute('ROLLBACK')
+            except Exception:
+                # ROLLBACK có thể fail nếu connection đã chết — không che lỗi gốc
+                pass
+            raise
+        finally:
+            cursor.close()
 
         return jsonify({
             'success': True,
-            'event_id': event_id,
+            'event_id': str(event_id),
             'event_code': event_code,
             'edit_key': edit_key,
-            'updated_at': created_updated_at,
+            'updated_at': created_updated_at.isoformat() if created_updated_at else None,
         })
     except HTTPException:
         # Để Flask xử lý (ví dụ 413 khi payload quá lớn)
@@ -217,25 +232,40 @@ def lookup_events():
 
         conn = get_db_connection()
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        events = load_events_summary(cursor, codes)
+        cursor.close()
+        return jsonify({'success': True, 'events': events})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return _server_error(e)
+
+
+@app.route('/api/my-events')
+@limiter.limit('30 per minute; 500 per day')
+def my_events():
+    """Danh sách event thuộc tài khoản đang đăng nhập — đồng bộ "Sự Kiện Của Tôi"
+    giữa các thiết bị. Chỉ trả metadata, không có edit_key (owner sửa bằng JWT)."""
+    try:
+        user_id = request_user_id(request)
+        if not user_id:
+            return jsonify({'success': False, 'error': 'Vui lòng đăng nhập.'}), 401
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute(
-            '''
-            SELECT event_code, title, members, expenses, rates, updated_at
-            FROM events WHERE event_code = ANY(%s)
-            ''',
-            (codes,),
+            '''SELECT event_code, title, updated_at FROM events
+               WHERE owner_id = %s::uuid ORDER BY updated_at DESC''',
+            (user_id,),
         )
         rows = cursor.fetchall()
         cursor.close()
-
-        events = [{
-            'event_code': r['event_code'],
-            'title': r['title'],
-            'members': json.loads(r['members']) if r['members'] else [],
-            'expenses': json.loads(r['expenses']) if r['expenses'] else [],
-            'rates': json.loads(r['rates']) if r['rates'] else {},
-            'updated_at': r['updated_at'].isoformat() if r['updated_at'] else None,
-        } for r in rows]
-        return jsonify({'success': True, 'events': events})
+        return jsonify({'success': True, 'events': [
+            {
+                'event_code': r['event_code'],
+                'title': r['title'],
+                'updated_at': r['updated_at'].isoformat() if r['updated_at'] else None,
+            } for r in rows
+        ]})
     except HTTPException:
         raise
     except Exception as e:
@@ -248,38 +278,44 @@ def get_event(event_code):
     try:
         conn = get_db_connection()
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute('SELECT * FROM events WHERE event_code = %s', (event_code,))
+        cursor.execute(
+            '''SELECT id, event_code, title, edit_key, owner_id, created_at, updated_at
+               FROM events WHERE event_code = %s''',
+            (event_code,),
+        )
         event = cursor.fetchone()
+        if not event:
+            cursor.close()
+            return jsonify({'success': False, 'error': 'Event not found'}), 404
+
+        doc = load_event_children(cursor, event['id'])
         cursor.close()
 
-        if event:
-            couples_raw = event.get('couples') if isinstance(event, dict) else None
-            rates_raw = event.get('rates') if isinstance(event, dict) else None
-            # Quyền sửa: sự kiện chưa có khóa (legacy) → ai cũng sửa được;
-            # có khóa → chỉ khi header X-Edit-Key khớp. UI dựa vào cờ này
-            # để hiện giao diện chỉnh sửa hay chỉ xem.
-            stored_key = event.get('edit_key')
-            provided = _provided_edit_key()
-            can_edit = (not stored_key) or bool(provided and hmac.compare_digest(stored_key, provided))
-            return jsonify({
-                'success': True,
-                'event': {
-                    'id': event['id'],
-                    'event_code': event['event_code'],
-                    'title': event['title'],
-                    'can_edit': can_edit,
-                    'members': json.loads(event['members']),
-                    'expenses': json.loads(event['expenses']),
-                    'bankInfo': json.loads(event['bank_info']) if event['bank_info'] else {},
-                    'couples': json.loads(couples_raw) if couples_raw else [],
-                    'rates': json.loads(rates_raw) if rates_raw else {},
-                    # Lưu ý: tuyệt đối không trả edit_key ở đây — link chỉ-xem
-                    # cũng gọi API này.
-                    'created_at': event['created_at'].isoformat() if event['created_at'] else None,
-                    'updated_at': event['updated_at'].isoformat() if event['updated_at'] else None,
-                },
-            })
-        return jsonify({'success': False, 'error': 'Event not found'}), 404
+        # Quyền sửa: sự kiện chưa có khóa (legacy) → ai cũng sửa được;
+        # có khóa → chỉ khi header X-Edit-Key khớp. UI dựa vào cờ này.
+        stored_key = event['edit_key']
+        provided = _provided_edit_key()
+        user_id = request_user_id(request)
+        is_owner = bool(event['owner_id'] and user_id and str(event['owner_id']) == user_id)
+        can_edit = is_owner or (not stored_key) or bool(
+            provided and hmac.compare_digest(stored_key, provided))
+        return jsonify({
+            'success': True,
+            'event': {
+                'id': str(event['id']),
+                'event_code': event['event_code'],
+                'title': event['title'],
+                'can_edit': can_edit,
+                'members': doc['members'],
+                'expenses': doc['expenses'],
+                'bankInfo': doc['bankInfo'],
+                'couples': doc['couples'],
+                'rates': doc['rates'],
+                # Lưu ý: tuyệt đối không trả edit_key — link chỉ-xem cũng gọi API này.
+                'created_at': event['created_at'].isoformat() if event['created_at'] else None,
+                'updated_at': event['updated_at'].isoformat() if event['updated_at'] else None,
+            },
+        })
     except Exception as e:
         return _server_error(e)
 
@@ -300,7 +336,7 @@ def update_event(event_code):
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        permission, current_updated_at = _check_edit_permission(cursor, event_code)
+        permission, event_id, current_updated_at = _check_edit_permission(cursor, event_code)
         if permission == 'not_found':
             cursor.close()
             return jsonify({'success': False, 'error': 'Event not found'}), 404
@@ -317,25 +353,24 @@ def update_event(event_code):
                 'error': 'Sự kiện đã được cập nhật ở nơi khác.',
             }), 409
 
-        cursor.execute(
-            '''
-            UPDATE events
-            SET title = %s, members = %s, expenses = %s, bank_info = %s, couples = %s, rates = %s, updated_at = CURRENT_TIMESTAMP
-            WHERE event_code = %s
-            RETURNING updated_at
-            ''',
-            (
-                data['title'],
-                json.dumps(data['members']),
-                json.dumps(data['expenses']),
-                json.dumps(data['bankInfo']),
-                json.dumps(data['couples']),
-                json.dumps(data['rates']),
-                event_code,
-            ),
-        )
-        new_row = cursor.fetchone()
-        cursor.close()
+        try:
+            cursor.execute('BEGIN')
+            cursor.execute(
+                'UPDATE events SET title = %s, updated_at = now() WHERE id = %s RETURNING updated_at',
+                (data['title'], event_id),
+            )
+            new_row = cursor.fetchone()
+            replace_event_children(cursor, event_id, data)
+            cursor.execute('COMMIT')
+        except Exception:
+            try:
+                cursor.execute('ROLLBACK')
+            except Exception:
+                # ROLLBACK có thể fail nếu connection đã chết — không che lỗi gốc
+                pass
+            raise
+        finally:
+            cursor.close()
         new_updated_at = new_row[0].isoformat() if new_row and new_row[0] else None
         return jsonify({'success': True, 'updated_at': new_updated_at})
     except HTTPException:
@@ -506,6 +541,17 @@ def get_banks():
         return _server_error(e)
 
 
+@app.route('/api/config')
+@limiter.exempt
+def get_config():
+    """Cấu hình public cho frontend (anon key của Supabase vốn là public;
+    index.html không dùng Jinja nên client lấy qua API này)."""
+    return jsonify({
+        'supabaseUrl': os.environ.get('SUPABASE_URL', ''),
+        'supabaseAnonKey': os.environ.get('SUPABASE_ANON_KEY', ''),
+    })
+
+
 @app.route('/api/events/<event_code>', methods=['DELETE'])
 @limiter.limit('10 per minute; 50 per day')
 def delete_event(event_code):
@@ -513,7 +559,7 @@ def delete_event(event_code):
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        permission, _unused = _check_edit_permission(cursor, event_code)
+        permission, _event_id, _unused = _check_edit_permission(cursor, event_code)
         if permission == 'not_found':
             cursor.close()
             return jsonify({'success': False, 'error': 'Event not found'}), 404

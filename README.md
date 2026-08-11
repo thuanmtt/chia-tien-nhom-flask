@@ -1,6 +1,6 @@
 # Ứng Dụng Chia Tiền Nhóm - Flask Version
 
-Ứng dụng chia tiền nhóm online nhanh chóng và tiện lợi, được xây dựng bằng Flask với Postgres (deploy trên Vercel).
+Ứng dụng chia tiền nhóm online nhanh chóng và tiện lợi, được xây dựng bằng Flask với Postgres (deploy trên Vercel, database trên Supabase).
 
 ## Tính năng chính
 
@@ -11,14 +11,14 @@
 - ✅ Chia sẻ sự kiện qua event_code
 - ✅ Cấu hình thông tin ngân hàng cho từng thành viên
 - ✅ Tạo QR code chuyển tiền
-- ✅ Lưu trữ dữ liệu trên Postgres (Vercel/Neon)
+- ✅ Lưu trữ dữ liệu trên Postgres (Supabase)
 
 ## Cài đặt và chạy
 
 ### Yêu cầu hệ thống
 - Python 3.9+
 - pip
-- Một database Postgres (Neon/Vercel Postgres, hoặc Postgres local)
+- Một database Postgres trên Supabase (schema quan hệ, xem `schema.sql`), hoặc Postgres local
 
 ### Cài đặt
 
@@ -33,14 +33,19 @@ cd chia-tien-nhom-flask
 pip install -r requirements.txt
 ```
 
-3. Tạo bảng (chạy 1 lần trên database):
+3. Tạo bảng (chạy trên database Supabase, idempotent — chạy lại không lỗi):
 ```bash
 psql "$DATABASE_URL" -f schema.sql
 ```
 
-4. Chạy ứng dụng:
+4. Chạy ứng dụng — `DATABASE_URL` là connection string qua Supabase pooler
+   (transaction mode, cổng 6543); `SUPABASE_URL` và `SUPABASE_ANON_KEY` lấy từ
+   Project Settings → API của project Supabase, cần để đăng nhập hoạt động:
 ```bash
-DATABASE_URL=postgres://... python vercel_app.py
+DATABASE_URL="postgres://...pooler...:6543/postgres" \
+SUPABASE_URL="https://<project-ref>.supabase.co" \
+SUPABASE_ANON_KEY="<anon-key>" \
+python vercel_app.py
 ```
 
 5. Mở trình duyệt và truy cập:
@@ -48,11 +53,24 @@ DATABASE_URL=postgres://... python vercel_app.py
 http://localhost:5002
 ```
 
+### Bật đăng nhập Google (Supabase Auth)
+
+1. Vào Supabase Dashboard → Authentication → Providers → bật **Google**, điền
+   Client ID/Secret lấy từ Google Cloud Console (OAuth 2.0 Client ID).
+2. Trong Google Cloud Console, thêm domain production và
+   `http://localhost:5002` vào danh sách Redirect URLs/Authorized redirect URIs
+   (URL callback do Supabase cung cấp ở màn hình bật provider).
+3. Trong Supabase Dashboard → Authentication → URL Configuration, thêm domain
+   production và `http://localhost:5002` vào **Redirect URLs**.
+
 ### Deploy Vercel
 
-Repo đã có sẵn `vercel.json` (entry `api/index.py` → `vercel_app.py`). Chỉ cần
-đặt env `DATABASE_URL` (hoặc `POSTGRES_URL`) trong project settings và chạy
-`schema.sql` trên database trước lần deploy đầu.
+Repo đã có sẵn `vercel.json` (entry `api/index.py` → `vercel_app.py`). Cần đặt
+các env sau trong project settings trước lần deploy: `DATABASE_URL` (hoặc
+`POSTGRES_URL`), `SUPABASE_URL`, `SUPABASE_ANON_KEY` (không đặt
+`SUPABASE_SERVICE_ROLE_KEY` — key này chỉ dùng trong test, tuyệt đối không
+đưa lên môi trường chạy app thật). Chạy `schema.sql` trên database trước lần
+deploy đầu.
 
 ## Cấu trúc dự án
 
@@ -97,10 +115,29 @@ từ lần ghi hợp lệ đầu tiên có gửi `X-Edit-Key`; từ đó về sa
 
 ## Biến môi trường
 
-- `DATABASE_URL` / `POSTGRES_URL` - Kết nối Postgres (bản deploy Vercel, `vercel_app.py`)
+- `DATABASE_URL` / `POSTGRES_URL` - Kết nối Postgres Supabase qua pooler (transaction
+  mode, cổng 6543), ví dụ: `postgres://postgres.<project>:<password>@<host>:6543/postgres`
+- `SUPABASE_URL` - URL project Supabase (`https://<project-ref>.supabase.co`), dùng để
+  verify JWT (JWKS) và trả cho frontend qua `GET /api/config`
+- `SUPABASE_ANON_KEY` - Anon/public key của project Supabase, trả cho frontend qua
+  `GET /api/config` để khởi tạo Supabase Auth client
+- `SUPABASE_SERVICE_ROLE_KEY` - **Chỉ dùng khi chạy `test_api.py`** (tạo/xóa user test
+  qua Admin API) — không cần và không nên đặt trên môi trường chạy app thật
 - `RATELIMIT_STORAGE_URI` - Storage cho rate limiter (mặc định `memory://`).
   Trên serverless (Vercel), `memory://` gần như vô hiệu vì mỗi instance có bộ nhớ
   riêng — nên trỏ tới Redis, ví dụ Upstash: `redis://default:<password>@<host>:<port>`
+
+## Migrate dữ liệu từ DB cũ
+
+Nếu database cũ (JSON blob, ví dụ Neon) còn dữ liệu cần giữ, chạy `migrate_to_supabase.py`
+để chuyển sang schema quan hệ mới (chạy lại được — upsert theo `event_code`,
+giữ nguyên `event_code`/`edit_key` nên link chia sẻ cũ vẫn sống):
+
+```bash
+OLD_DATABASE_URL=postgres://...(Neon) \
+DATABASE_URL=postgres://...(Supabase pooler 6543) \
+python3 migrate_to_supabase.py
+```
 
 ## Cách sử dụng
 
@@ -135,15 +172,11 @@ Ví dụ: `250115A1B2C3D4`
 
 ## Database Schema
 
-### Bảng `events`
-- `id`: UUID chính
-- `event_code`: Mã sự kiện duy nhất
-- `title`: Tên sự kiện
-- `members`: JSON array thành viên
-- `expenses`: JSON array chi phí
-- `bank_info`: JSON object thông tin ngân hàng
-- `created_at`: Thời gian tạo
-- `updated_at`: Thời gian cập nhật
+Schema quan hệ, xem chi tiết ở `schema.sql`. Bảng `events` (title, event_code,
+edit_key, owner_id, created_at, updated_at) là bảng chính; các bảng con `members`,
+`expenses`, `expense_beneficiaries`, `member_bank_info`, `couples`, `couple_members`,
+`event_rates` lưu chi tiết theo `event_id`. API vẫn nhận/trả nguyên document JSON
+như cũ — `event_store.py` lo việc decompose/compose giữa document và các bảng.
 
 ## LocalStorage
 

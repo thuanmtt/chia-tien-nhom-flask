@@ -4,11 +4,48 @@ Test script cho Flask app
 """
 
 import os
+import secrets
 
 import requests
 
 # vercel_app.py chạy local ở port 5002; override bằng env khi cần
 BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5002')
+
+# Env cho test auth (bắt buộc từ khi POST /api/events yêu cầu đăng nhập)
+SUPABASE_URL = os.environ.get('SUPABASE_URL', '').rstrip('/')
+SUPABASE_ANON_KEY = os.environ.get('SUPABASE_ANON_KEY', '')
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY', '')
+
+
+def create_test_user():
+    """Tạo user test qua Admin API (service_role — CHỈ dùng trong test) và
+    đăng nhập lấy access token thật. Trả về (user_id, access_token)."""
+    email = f'test-{secrets.token_hex(6)}@example.com'
+    password = secrets.token_urlsafe(16)
+    r = requests.post(
+        f'{SUPABASE_URL}/auth/v1/admin/users',
+        headers={'apikey': SUPABASE_SERVICE_ROLE_KEY,
+                 'Authorization': f'Bearer {SUPABASE_SERVICE_ROLE_KEY}'},
+        json={'email': email, 'password': password, 'email_confirm': True},
+    )
+    assert r.status_code in (200, 201), f'Không tạo được user test: {r.status_code} {r.text}'
+    user_id = r.json()['id']
+    r = requests.post(
+        f'{SUPABASE_URL}/auth/v1/token?grant_type=password',
+        headers={'apikey': SUPABASE_ANON_KEY},
+        json={'email': email, 'password': password},
+    )
+    assert r.status_code == 200, f'Không đăng nhập được user test: {r.status_code} {r.text}'
+    return user_id, r.json()['access_token']
+
+
+def delete_test_user(user_id):
+    requests.delete(
+        f'{SUPABASE_URL}/auth/v1/admin/users/{user_id}',
+        headers={'apikey': SUPABASE_SERVICE_ROLE_KEY,
+                 'Authorization': f'Bearer {SUPABASE_SERVICE_ROLE_KEY}'},
+    )
+
 
 def test_banks_api():
     """Test API lấy danh sách ngân hàng"""
@@ -22,7 +59,7 @@ def test_banks_api():
         print(f"❌ Banks API failed - Status: {response.status_code}")
         return False
 
-def test_create_event():
+def test_create_event(token):
     """Test tạo sự kiện mới"""
     print("Testing create event API...")
     event_data = {
@@ -46,7 +83,7 @@ def test_create_event():
     response = requests.post(
         f"{BASE_URL}/api/events",
         json=event_data,
-        headers={'Content-Type': 'application/json'}
+        headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {token}'}
     )
 
     if response.status_code == 200:
@@ -238,36 +275,149 @@ def test_delete_event(event_code, edit_key):
         print(f"❌ Delete event failed - Status: {response.status_code}")
         return False
 
+def test_roundtrip_document(event_code, edit_key):
+    """PUT document đầy đủ (đa tiền tệ, couples, rates) rồi GET so từng trường —
+    bất biến quan trọng nhất của schema quan hệ: không mất/không méo dữ liệu."""
+    print("Testing document round-trip...")
+    doc = {
+        "title": "Round Trip Đà Lạt",
+        "members": ["An", "Bình", "Chi"],
+        "expenses": [
+            {"title": "Khách sạn", "amount": 1500000, "currency": "VND",
+             "payer": "An", "benefitType": "all", "beneficiaries": [],
+             "expense_date": "2026-08-01", "created_time": "2026-08-01T10:00:00",
+             "updated_time": "2026-08-01T10:00:00"},
+            {"title": "Ăn tối", "amount": 45.5, "currency": "USD",
+             "payer": "Bình", "benefitType": "selected",
+             "beneficiaries": ["An", "Chi"],
+             "expense_date": "2026-08-02", "created_time": "", "updated_time": ""},
+        ],
+        "bankInfo": {"An": {"bank": "VCB", "account": "123456"}},
+        "couples": [{"id": "c1", "label": "Vợ chồng An",
+                     "members": ["An", "Bình"], "primary": "An"}],
+        "rates": {"USD": {"rate": 25000, "source": "test", "rateDate": "2026-08-01",
+                          "rateType": "mid", "currencyName": "US Dollar"}},
+    }
+    r = requests.get(f"{BASE_URL}/api/events/{event_code}")
+    doc_put = dict(doc)
+    doc_put["expectedUpdatedAt"] = r.json()["event"]["updated_at"]
+    r = requests.put(f"{BASE_URL}/api/events/{event_code}", json=doc_put,
+                     headers={'X-Edit-Key': edit_key})
+    if r.status_code != 200:
+        print(f"❌ Round-trip PUT failed - Status: {r.status_code} {r.text}")
+        return False
+    r = requests.get(f"{BASE_URL}/api/events/{event_code}")
+    got = r.json()["event"]
+    for key in ("title", "members", "expenses", "bankInfo", "couples", "rates"):
+        if got[key] != doc[key]:
+            print(f"❌ Round-trip lệch ở '{key}':\n  gửi:  {doc[key]}\n  nhận: {got[key]}")
+            return False
+    print("✅ Round-trip OK - document giữ nguyên qua PUT/GET")
+    return True
+
+def test_auth_matrix(token):
+    """Ma trận quyền tạo/sửa: 401 vs 403, owner JWT vs edit_key."""
+    print("Testing auth matrix...")
+    payload = {"title": "Auth Matrix", "members": ["An"], "expenses": []}
+
+    # 1. POST không token / token rác → 401
+    r = requests.post(f"{BASE_URL}/api/events", json=payload)
+    assert r.status_code == 401, f'POST không token phải 401, được {r.status_code}'
+    r = requests.post(f"{BASE_URL}/api/events", json=payload,
+                      headers={'Authorization': 'Bearer khong-phai-jwt'})
+    assert r.status_code == 401, f'POST token rác phải 401, được {r.status_code}'
+    print("  ✅ POST không/sai token → 401")
+
+    # 2. POST có token → tạo được
+    r = requests.post(f"{BASE_URL}/api/events", json=payload,
+                      headers={'Authorization': f'Bearer {token}'})
+    assert r.status_code == 200 and r.json().get('edit_key'), r.text
+    code = r.json()['event_code']
+    edit_key = r.json()['edit_key']
+    updated_at = r.json()['updated_at']
+    print(f"  ✅ POST có token → tạo được ({code})")
+
+    # 3. GET công khai: không lộ edit_key, can_edit=false; owner JWT: can_edit=true
+    r = requests.get(f"{BASE_URL}/api/events/{code}")
+    ev = r.json()['event']
+    assert 'edit_key' not in ev, 'GET không được trả edit_key'
+    assert ev['can_edit'] is False, 'người lạ không có can_edit'
+    r = requests.get(f"{BASE_URL}/api/events/{code}",
+                     headers={'Authorization': f'Bearer {token}'})
+    assert r.json()['event']['can_edit'] is True, 'owner phải có can_edit'
+    print("  ✅ GET: không lộ edit_key; can_edit đúng theo vai")
+
+    # 4. PUT bằng owner JWT, KHÔNG có edit_key → 200
+    put_doc = dict(payload)
+    put_doc['expectedUpdatedAt'] = updated_at
+    r = requests.put(f"{BASE_URL}/api/events/{code}", json=put_doc,
+                     headers={'Authorization': f'Bearer {token}'})
+    assert r.status_code == 200, f'owner PUT không cần key phải 200, được {r.status_code}'
+    updated_at = r.json()['updated_at']
+    print("  ✅ PUT bằng owner JWT (không edit_key) → 200")
+
+    # 5. PUT bằng edit_key, không token → 200 (đường người được chia sẻ)
+    put_doc['expectedUpdatedAt'] = updated_at
+    r = requests.put(f"{BASE_URL}/api/events/{code}", json=put_doc,
+                     headers={'X-Edit-Key': edit_key})
+    assert r.status_code == 200, f'PUT bằng edit_key phải 200, được {r.status_code}'
+    updated_at = r.json()['updated_at']
+    print("  ✅ PUT bằng edit_key → 200")
+
+    # 6. PUT sai cả hai → 403
+    put_doc['expectedUpdatedAt'] = updated_at
+    r = requests.put(f"{BASE_URL}/api/events/{code}", json=put_doc,
+                     headers={'X-Edit-Key': 'sai-key'})
+    assert r.status_code == 403, f'PUT sai key phải 403, được {r.status_code}'
+    print("  ✅ PUT sai key, không token → 403")
+
+    # 7. my-events: có event vừa tạo; không token → 401
+    r = requests.get(f"{BASE_URL}/api/my-events",
+                     headers={'Authorization': f'Bearer {token}'})
+    codes = [e['event_code'] for e in r.json()['events']]
+    assert code in codes, 'my-events phải chứa event vừa tạo'
+    r = requests.get(f"{BASE_URL}/api/my-events")
+    assert r.status_code == 401
+    print("  ✅ /api/my-events đúng theo vai")
+
+    # 8. Dọn: owner xóa không cần key
+    r = requests.delete(f"{BASE_URL}/api/events/{code}",
+                        headers={'Authorization': f'Bearer {token}'})
+    assert r.status_code == 200, f'owner DELETE phải 200, được {r.status_code}'
+    print("✅ Auth matrix OK")
+    return True
+
 def main():
     """Chạy tất cả tests"""
     print("🚀 Starting API tests...\n")
-    
-    # Test banks API
+
+    if not (SUPABASE_URL and SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY):
+        print("❌ Cần SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY để test auth.")
+        return
+
     if not test_banks_api():
         return
-    
-    # Test create event
-    event_code, edit_key = test_create_event()
-    if not event_code:
-        return
 
-    # Test get event
-    if not test_get_event(event_code, edit_key):
-        return
-
-    # Test batch lookup
-    if not test_lookup_events(event_code):
-        return
-
-    # Test update event
-    if not test_update_event(event_code, edit_key):
-        return
-
-    # Test delete event
-    if not test_delete_event(event_code, edit_key):
-        return
-    
-    print("\n🎉 All tests passed!")
+    user_id, token = create_test_user()
+    try:
+        event_code, edit_key = test_create_event(token)
+        if not event_code:
+            return
+        if not test_get_event(event_code, edit_key):
+            return
+        if not test_lookup_events(event_code):
+            return
+        if not test_update_event(event_code, edit_key):
+            return
+        if not test_roundtrip_document(event_code, edit_key):
+            return
+        if not test_auth_matrix(token):
+            return
+        if not test_delete_event(event_code, edit_key):
+            return
+        print("\n🎉 All tests passed!")
+    finally:
+        delete_test_user(user_id)
 
 if __name__ == "__main__":
-    main() 
+    main()
