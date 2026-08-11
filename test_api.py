@@ -8,6 +8,13 @@ import secrets
 
 import requests
 
+# Nạp .env ở repo root (nếu có) để khỏi phải export tay khi chạy local
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
+except ImportError:
+    pass
+
 # vercel_app.py chạy local ở port 5002; override bằng env khi cần
 BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5002')
 

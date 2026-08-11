@@ -26,6 +26,13 @@ import psycopg2.extras
 from validation import ValidationError, validate_event_payload
 from event_store import replace_event_children
 
+# Nạp .env ở repo root (nếu có) — OLD_DATABASE_URL/DATABASE_URL khỏi export tay
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
+except ImportError:
+    pass
+
 
 def main():
     old_url = os.environ.get('OLD_DATABASE_URL')

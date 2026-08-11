@@ -38,17 +38,24 @@ pip install -r requirements.txt
 psql "$DATABASE_URL" -f schema.sql
 ```
 
-4. Chạy ứng dụng — `DATABASE_URL` là connection string qua Supabase pooler
-   (transaction mode, cổng 6543); `SUPABASE_URL` và `SUPABASE_ANON_KEY` lấy từ
-   Project Settings → API của project Supabase, cần để đăng nhập hoạt động:
+4. Tạo file `.env` từ mẫu rồi điền giá trị thật (app tự nạp `.env` khi chạy
+   local; file này nằm trong `.gitignore`, không commit):
 ```bash
-DATABASE_URL="postgres://...pooler...:6543/postgres" \
-SUPABASE_URL="https://<project-ref>.supabase.co" \
-SUPABASE_ANON_KEY="<anon-key>" \
-python vercel_app.py
+cp .env.example .env
 ```
+   - `DATABASE_URL`: connection string qua Supabase **pooler** (transaction
+     mode, cổng 6543) — host `db.<project-ref>.supabase.co` không dùng được.
+   - `SUPABASE_URL`, `SUPABASE_ANON_KEY`: Project Settings → API — cần để
+     đăng nhập hoạt động.
 
-5. Mở trình duyệt và truy cập:
+5. Chạy ứng dụng:
+```bash
+python3 vercel_app.py
+```
+   (Vẫn có thể override bằng biến môi trường export sẵn — `.env` không ghi đè
+   biến đã có.)
+
+6. Mở trình duyệt và truy cập:
 ```
 http://localhost:5002
 ```

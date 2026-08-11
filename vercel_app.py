@@ -19,6 +19,16 @@ from supabase_auth import request_user_id
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Nạp biến môi trường từ .env cho local dev (trên Vercel dùng env của project,
+# không có file .env nên đây là no-op). Phải chạy TRƯỚC khi tạo limiter vì
+# limiter đọc RATELIMIT_STORAGE_URI ngay lúc khởi tạo. Không ghi đè biến đã
+# được export sẵn trong môi trường.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(BASE_DIR, '.env'))
+except ImportError:
+    pass
+
 app = Flask(
     __name__,
     template_folder=os.path.join(BASE_DIR, 'templates'),

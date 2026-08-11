@@ -9,17 +9,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# Run locally (requires a Postgres — there is no SQLite fallback)
-DATABASE_URL=postgres://... python3 vercel_app.py   # → http://localhost:5002
+# Run locally (requires a Postgres — there is no SQLite fallback).
+# Env đọc từ file .env ở repo root (python-dotenv, không ghi đè biến export sẵn;
+# xem .env.example). Trên Vercel không có .env — env đặt trong project settings.
+python3 vercel_app.py   # → http://localhost:5002
 
 # Create/migrate schema (idempotent, must be run manually — no auto-migration)
 psql "$DATABASE_URL" -f schema.sql
 
 # Integration tests (plain script, not pytest) — needs a running server + real DB.
-# Creates and deletes a real event and a real Supabase test user; BASE_URL defaults
-# to http://localhost:5002. Requires SUPABASE_URL, SUPABASE_ANON_KEY,
-# SUPABASE_SERVICE_ROLE_KEY (service_role — test-only, never referenced in app code).
-BASE_URL=http://localhost:5002 SUPABASE_URL=... SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... python3 test_api.py
+# Creates and deletes a real event and a real Supabase test user. Đọc env từ .env
+# (cần SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY — service key
+# chỉ dùng trong test, never referenced in app code). BASE_URL mặc định :5002.
+python3 test_api.py
 
 # Unit tests for the split algorithm (pure logic, no server/DB needed)
 node test_split.js
