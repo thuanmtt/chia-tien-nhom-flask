@@ -34,13 +34,34 @@
         if (!$area.length || !client) return;
         $area.empty();
         if (session) {
-            // Email là dữ liệu user-controlled → .text()
-            $area.append($('<span class="navbar-text text-white small me-2"></span>').text(userEmail()));
-            $area.append('<button type="button" class="btn btn-outline-light btn-sm" id="logoutBtn">'
-                + '<i class="fas fa-sign-out-alt me-1"></i>Đăng xuất</button>');
+            // Dropdown user đồng bộ style nav-link với các mục còn lại.
+            // Email là dữ liệu user-controlled → luôn qua .text()
+            const email = userEmail();
+            const shortName = email.split('@')[0];
+            const $toggle = $('<a class="nav-link dropdown-toggle" href="#" role="button"'
+                + ' data-bs-toggle="dropdown" aria-expanded="false">'
+                + '<i class="fas fa-user-circle me-1"></i></a>');
+            $toggle.append($('<span></span>').text(shortName));
+            const $menu = $('<ul class="dropdown-menu dropdown-menu-end"></ul>');
+            $menu.append($('<li></li>').append($('<h6 class="dropdown-header"></h6>').text(email)));
+            $menu.append('<li><hr class="dropdown-divider"></li>');
+            $menu.append('<li><button type="button" class="dropdown-item" id="logoutBtn">'
+                + '<i class="fas fa-sign-out-alt me-1"></i>Đăng xuất</button></li>');
+            $area.append($toggle).append($menu);
         } else {
-            $area.append('<button type="button" class="btn btn-light btn-sm" id="loginBtn">'
-                + '<i class="fas fa-user me-1"></i>Đăng nhập</button>');
+            $area.append('<a class="nav-link" href="#" id="loginBtn">'
+                + '<i class="fas fa-sign-in-alt me-1"></i>Đăng Nhập</a>');
+        }
+    }
+
+    // supabase-js KHÔNG tự xóa #access_token=... khỏi thanh địa chỉ sau khi xử lý.
+    // Nếu để lại: (1) URL xấu/lộ token khi copy; (2) lần đăng nhập OAuth sau sẽ
+    // redirect kèm hash cũ → token cũ (đã thu hồi) đè token mới → đăng nhập "câm".
+    function cleanAuthHash() {
+        const h = window.location.hash;
+        if (h && (h.indexOf('access_token=') !== -1 || h.indexOf('error_code=') !== -1
+                || h.indexOf('error_description=') !== -1)) {
+            window.history.replaceState(null, '', window.location.pathname + window.location.search);
         }
     }
 
@@ -70,10 +91,11 @@
             const cfg = await resp.json();
             if (cfg.supabaseUrl && cfg.supabaseAnonKey && window.supabase) {
                 client = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
-                const res = await client.auth.getSession();
-                session = (res.data && res.data.session) || null;
+                // Đăng ký listener TRƯỚC getSession để không lỡ sự kiện SIGNED_IN
+                // khi supabase-js đọc #access_token từ URL (OAuth redirect về)
                 client.auth.onAuthStateChange(function (event, s) {
                     session = s;
+                    cleanAuthHash();
                     renderAuthArea();
                     if (event === 'PASSWORD_RECOVERY') {
                         // Người dùng vào từ link đặt lại mật khẩu trong email
@@ -82,10 +104,21 @@
                     }
                     document.dispatchEvent(new CustomEvent('appauth:change'));
                 });
+                try {
+                    const res = await client.auth.getSession();
+                    session = (res.data && res.data.session) || null;
+                } catch (e) {
+                    // Token trong URL hỏng/đã thu hồi → coi như chưa đăng nhập,
+                    // KHÔNG được làm chết phần auth còn lại
+                    session = null;
+                }
             }
         } catch (e) {
             // Thiếu cấu hình / lỗi mạng → chạy như bản không có auth
         }
+        // Luôn dọn hash token khỏi URL, kể cả khi xử lý phía trên lỗi —
+        // hash sót lại làm hỏng lần đăng nhập OAuth kế tiếp
+        cleanAuthHash();
         renderAuthArea();
         ready = true;
         readyCallbacks.splice(0).forEach(function (cb) { cb(); });
@@ -142,7 +175,9 @@
         // supabase-js tự bắt token trong URL khi quay về (detectSessionInUrl)
         await client.auth.signInWithOAuth({
             provider: 'google',
-            options: { redirectTo: window.location.href }
+            // KHÔNG dùng location.href: nếu URL còn hash (#access_token cũ) thì
+            // token mới bị gắn SAU hash cũ → parse trúng token đã thu hồi
+            options: { redirectTo: window.location.origin + window.location.pathname + window.location.search }
         });
     });
 
