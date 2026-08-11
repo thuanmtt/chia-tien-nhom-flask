@@ -155,3 +155,16 @@
             padding: 4px 6px;
         }
     }
+
+/* Overlay loading khi tải sự kiện từ link chia sẻ (tránh chớp UI sai quyền) */
+.app-loading {
+    position: fixed;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.95);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    z-index: 3000;
+}

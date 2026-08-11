@@ -155,6 +155,26 @@
         // Quyền chỉnh sửa do SERVER quyết định: GET event trả về cờ can_edit
         // dựa trên khóa X-Edit-Key gửi kèm. Có khóa hợp lệ → giao diện chỉnh sửa,
         // không có/sai khóa → giao diện chỉ xem (loadEventFromServer xử lý).
+        // Overlay loading toàn trang khi đang tải sự kiện từ link
+        function showAppLoading(show) {
+            $('#appLoading').toggleClass('d-none', !show);
+        }
+
+        // Đang mở một sự kiện có sẵn? Che trang bằng overlay + đặt UI tạm theo
+        // quyền dự đoán — người nhận link chỉ-xem sẽ không thấy "chớp" giao
+        // diện chỉnh sửa trong lúc chờ server xác nhận quyền thật (can_edit).
+        const bootHasEvent = window.location.pathname.startsWith('/share/')
+            || !!urlEventCode || !!currentEventCode;
+        if (bootHasEvent) {
+            showAppLoading(true);
+            if (window.location.pathname.startsWith('/share/')) {
+                allowEdit = false;
+            } else if (urlEventCode) {
+                allowEdit = !!(urlEditKey || getEditKey(urlEventCode));
+            }
+            updateUIForEditMode();
+        }
+
         // Chờ AppAuth biết session (từ localStorage, không chờ mạng lâu) rồi mới
         // tải event — để owner mở event của mình trên máy mới nhận đúng can_edit
         // qua JWT thay vì bị rơi về chế độ chỉ xem.
@@ -522,6 +542,7 @@
 
             // Cập nhật UI dựa trên chế độ chỉnh sửa
             updateUIForEditMode();
+            showAppLoading(false);
         }
 
         // ===== Khóa chỉnh sửa (edit key) =====
@@ -812,9 +833,10 @@
 
                         // Tự động tính toán khi tải sự kiện
                         calculateSplit(false);
-                        
+
                         // Cập nhật UI dựa trên chế độ chỉnh sửa
                         updateUIForEditMode();
+                        showAppLoading(false);
                     } else {
                         showToast('Không tìm thấy sự kiện!', 'error');
                         createNewEvent();

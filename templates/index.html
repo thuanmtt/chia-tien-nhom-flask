@@ -49,6 +49,12 @@
           integrity="sha384-OXVF05DQEe311p6ohU11NwlnX08FzMCsyoXzGOaL+83dKAb3qS17yZJxESl8YrJQ" crossorigin="anonymous" />
 </head>
 <body>
+<!-- Overlay loading: che trang khi đang tải sự kiện từ link chia sẻ, tránh
+     "chớp" giao diện chỉnh sửa trước khi server xác nhận quyền -->
+<div id="appLoading" class="app-loading d-none">
+    <div class="spinner-border text-primary" role="status"></div>
+    <div class="text-muted">Đang tải sự kiện...</div>
+</div>
 <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
     <div class="container">
         <a class="navbar-brand" href="#">
