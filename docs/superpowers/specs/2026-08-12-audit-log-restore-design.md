@@ -161,8 +161,10 @@ cả save. Audit không được phép thiếu dòng.
   username tự đặt — mọi render qua `escapeHtml()`/`.text()` theo quy ước dự án.
 
 **Khác:**
-- `.couple-label-input` handler `input` → debounce ~500ms trước khi `saveEvent(false)`
-  (giảm số PUT; squash server đã gộp log nhưng bớt request thừa vẫn tốt).
+- ~~Debounce `.couple-label-input`~~ — khảo sát code cho thấy handler `input` này chỉ cập
+  nhật `couplesDraft`, save chỉ chạy khi bấm "Lưu" trong modal → không có PUT theo
+  keystroke, không cần debounce. Squash phía server vẫn giữ (gộp các lần sửa liên tiếp
+  cùng đối tượng).
 - `sw.js`: bump `CACHE_VERSION`.
 
 ## 7. Kiểm thử
