@@ -84,13 +84,30 @@ def _provided_edit_key():
     return request.headers.get('X-Edit-Key', '').strip()
 
 
+def _collaborator_role(cursor, event_id, user_id):
+    """Vai trò được mời đích danh ('viewer'/'editor') của user trên event, None nếu không.
+
+    Chấp nhận cả cursor thường lẫn RealDictCursor (get_event dùng dict cursor)."""
+    if not user_id:
+        return None
+    cursor.execute(
+        'SELECT role FROM event_collaborators WHERE event_id = %s AND user_id = %s::uuid',
+        (event_id, user_id),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    return row['role'] if isinstance(row, dict) else row[0]
+
+
 def _check_edit_permission(cursor, event_code, allow_link_editor=True, adopt_key=True):
     """Kiểm tra quyền sửa/xóa event.
 
     Trả về (status, event_id, updated_at) với status: 'not_found' | 'forbidden' | 'ok'.
     Quyền hợp lệ khi: là owner (JWT Supabase) HOẶC event chia sẻ ở chế độ
     "ai có link đều chỉnh sửa" (share_access='link' + share_role='editor',
-    trừ DELETE — allow_link_editor=False) HOẶC X-Edit-Key khớp.
+    trừ DELETE — allow_link_editor=False) HOẶC X-Edit-Key khớp HOẶC là
+    collaborator vai trò 'editor' (bảng event_collaborators, trừ DELETE).
     Event cũ chưa có edit_key: chấp nhận request và "nhận" key client gửi lên
     (nếu có) làm key chính thức, để dữ liệu cũ không bị khóa ngoài ý muốn.
     adopt_key=False: dùng cho route chỉ-đọc (GET) — vẫn cho qua ('ok') nếu
@@ -110,6 +127,12 @@ def _check_edit_permission(cursor, event_code, allow_link_editor=True, adopt_key
     # Owner đăng nhập có toàn quyền — kể cả khi client gửi kèm key sai/tự sinh
     user_id = request_user_id(request)
     if owner_id and user_id and str(owner_id) == user_id:
+        return 'ok', event_id, updated_at
+
+    # Người được mời đích danh vai trò "người chỉnh sửa": sửa nội dung + đổi
+    # chia sẻ được, nhưng không xóa event (đi cùng cờ allow_link_editor, giống
+    # link-editor — DELETE gọi với allow_link_editor=False)
+    if allow_link_editor and user_id and _collaborator_role(cursor, event_id, user_id) == 'editor':
         return 'ok', event_id, updated_at
 
     # Chia sẻ kiểu Google Docs: "Bất kỳ ai có đường liên kết — Người chỉnh sửa"
@@ -493,9 +516,10 @@ def get_event(event_code):
         user_id = request_user_id(request)
         is_owner = bool(event['owner_id'] and user_id and str(event['owner_id']) == user_id)
         key_ok = bool(stored_key and provided and hmac.compare_digest(stored_key, provided))
+        collab_role = _collaborator_role(cursor, event['id'], user_id)
 
-        # Chế độ "Hạn chế": chỉ owner hoặc người cầm edit_key xem được
-        if event['share_access'] == 'restricted' and not (is_owner or key_ok):
+        # Chế độ "Hạn chế": owner / người cầm edit_key / người được mời đích danh
+        if event['share_access'] == 'restricted' and not (is_owner or key_ok or collab_role):
             cursor.close()
             return jsonify({
                 'success': False,
@@ -511,7 +535,8 @@ def get_event(event_code):
         # QUYỀN và ĐÃ đăng nhập; có quyền mà chưa đăng nhập → cờ riêng để UI
         # hiện "Đăng nhập để chỉnh sửa".
         link_editor = event['share_access'] == 'link' and event['share_role'] == 'editor'
-        has_permission = is_owner or key_ok or (not stored_key) or link_editor
+        has_permission = (is_owner or key_ok or (not stored_key) or link_editor
+                          or collab_role == 'editor')
         can_edit = has_permission and bool(user_id)
         login_required_to_edit = has_permission and not user_id
         return jsonify({
@@ -521,6 +546,7 @@ def get_event(event_code):
                 'event_code': event['event_code'],
                 'title': event['title'],
                 'can_edit': can_edit,
+                'is_owner': is_owner,
                 'login_required_to_edit': login_required_to_edit,
                 'share_access': event['share_access'],
                 'share_role': event['share_role'],

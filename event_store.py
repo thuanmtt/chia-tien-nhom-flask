@@ -337,13 +337,16 @@ def load_events_summary(cursor, codes, viewer_user_id=None):
     cần (đếm thành viên/chi phí + tính tổng theo rates). Giữ shape response cũ
     nhưng expenses chỉ gồm {amount, currency}. cursor là RealDictCursor.
 
-    Event ở chế độ chia sẻ 'restricted' chỉ trả về cho chính owner
-    (viewer_user_id = None → loại hết event restricted)."""
+    Event ở chế độ chia sẻ 'restricted' chỉ trả về cho owner HOẶC người được
+    mời đích danh (event_collaborators) (viewer_user_id = None → loại hết
+    event restricted)."""
     cursor.execute(
         '''SELECT id, event_code, title, updated_at FROM events
            WHERE event_code = ANY(%s)
-             AND (share_access <> 'restricted' OR owner_id = %s::uuid)''',
-        (codes, viewer_user_id),
+             AND (share_access <> 'restricted' OR owner_id = %s::uuid
+                  OR EXISTS (SELECT 1 FROM event_collaborators c
+                             WHERE c.event_id = events.id AND c.user_id = %s::uuid))''',
+        (codes, viewer_user_id, viewer_user_id),
     )
     events = cursor.fetchall()
     if not events:
