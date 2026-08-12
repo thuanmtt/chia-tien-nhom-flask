@@ -16,7 +16,7 @@ from werkzeug.exceptions import HTTPException
 
 from validation import ValidationError, validate_event_payload
 from event_store import replace_event_children, load_event_children, load_events_summary
-from supabase_auth import request_user_id
+from supabase_auth import request_user_id, request_user_claims
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -183,7 +183,8 @@ def manifest():
 def create_event():
     try:
         # Tạo sự kiện yêu cầu đăng nhập (401 ≠ 403: chưa đăng nhập vs không có quyền)
-        user_id = request_user_id(request)
+        claims = request_user_claims(request)
+        user_id = (claims or {}).get('sub')
         if not user_id:
             return jsonify({'success': False, 'error': 'Vui lòng đăng nhập để tạo sự kiện.'}), 401
 
@@ -462,9 +463,14 @@ def get_event(event_code):
         cursor.close()
 
         # Quyền sửa: owner / key đúng / sự kiện chưa có khóa (legacy) /
-        # chia sẻ "ai có link đều chỉnh sửa". UI dựa vào cờ này.
+        # chia sẻ "ai có link đều chỉnh sửa". Nhưng mọi thao tác ghi giờ yêu cầu
+        # đăng nhập → can_edit ("PUT của bạn sẽ thành công") chỉ true khi CÓ
+        # QUYỀN và ĐÃ đăng nhập; có quyền mà chưa đăng nhập → cờ riêng để UI
+        # hiện "Đăng nhập để chỉnh sửa".
         link_editor = event['share_access'] == 'link' and event['share_role'] == 'editor'
-        can_edit = is_owner or key_ok or (not stored_key) or link_editor
+        has_permission = is_owner or key_ok or (not stored_key) or link_editor
+        can_edit = has_permission and bool(user_id)
+        login_required_to_edit = has_permission and not user_id
         return jsonify({
             'success': True,
             'event': {
@@ -472,6 +478,7 @@ def get_event(event_code):
                 'event_code': event['event_code'],
                 'title': event['title'],
                 'can_edit': can_edit,
+                'login_required_to_edit': login_required_to_edit,
                 'share_access': event['share_access'],
                 'share_role': event['share_role'],
                 'members': doc['members'],
@@ -492,6 +499,12 @@ def get_event(event_code):
 @limiter.limit('60 per minute; 1000 per day')
 def update_event(event_code):
     try:
+        # Mọi thao tác ghi yêu cầu đăng nhập — để hành động gắn được danh tính
+        # vào lịch sử. Quyền sửa (owner/edit_key/link-editor) kiểm tra sau, như cũ.
+        claims = request_user_claims(request)
+        if not (claims or {}).get('sub'):
+            return jsonify({'success': False, 'error': 'Vui lòng đăng nhập để chỉnh sửa.'}), 401
+
         raw = request.get_json(silent=True)
         try:
             data = validate_event_payload(raw)
@@ -731,6 +744,12 @@ def update_sharing(event_code):
     Không bump updated_at: đổi chia sẻ không phải sửa nội dung, tránh 409
     vô cớ cho người đang lưu document."""
     try:
+        # Mọi thao tác ghi yêu cầu đăng nhập — để hành động gắn được danh tính
+        # vào lịch sử. Quyền sửa (owner/edit_key/link-editor) kiểm tra sau, như cũ.
+        claims = request_user_claims(request)
+        if not (claims or {}).get('sub'):
+            return jsonify({'success': False, 'error': 'Vui lòng đăng nhập để chỉnh sửa.'}), 401
+
         body = request.get_json(silent=True) or {}
         access = body.get('access')
         role = body.get('role')
@@ -763,6 +782,12 @@ def update_sharing(event_code):
 @limiter.limit('10 per minute; 50 per day')
 def delete_event(event_code):
     try:
+        # Mọi thao tác ghi yêu cầu đăng nhập — để hành động gắn được danh tính
+        # vào lịch sử. Quyền sửa (owner/edit_key/link-editor) kiểm tra sau, như cũ.
+        claims = request_user_claims(request)
+        if not (claims or {}).get('sub'):
+            return jsonify({'success': False, 'error': 'Vui lòng đăng nhập để chỉnh sửa.'}), 401
+
         conn = get_db_connection()
         cursor = conn.cursor()
 
