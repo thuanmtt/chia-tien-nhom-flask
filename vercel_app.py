@@ -424,19 +424,21 @@ def save_my_events():
 
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT count(*) FROM saved_events WHERE user_id = %s::uuid', (user_id,))
-        remaining = _SAVED_EVENTS_CAP - cursor.fetchone()[0]
-        if remaining > 0:
-            # Mã trùng/đã lưu: ON CONFLICT bỏ qua. Vượt cap: cắt bớt phần thừa.
-            cursor.execute(
-                '''INSERT INTO saved_events (user_id, event_id)
-                   SELECT %s::uuid, e.id FROM events e
-                   WHERE e.event_code = ANY(%s)
-                   ORDER BY e.updated_at DESC
-                   LIMIT %s
-                   ON CONFLICT DO NOTHING''',
-                (user_id, codes, remaining),
-            )
+        # Cap 200/user: đếm và chèn trong CÙNG MỘT câu lệnh (thu hẹp race giữa
+        # đếm và chèn khi 2 request save đồng thời); mã đã lưu bị loại TRƯỚC
+        # khi LIMIT nên không "ăn" mất suất của mã mới trong cùng batch.
+        cursor.execute(
+            '''INSERT INTO saved_events (user_id, event_id)
+               SELECT %s::uuid, e.id FROM events e
+               WHERE e.event_code = ANY(%s)
+                 AND NOT EXISTS (SELECT 1 FROM saved_events s
+                                 WHERE s.user_id = %s::uuid AND s.event_id = e.id)
+               ORDER BY e.updated_at DESC
+               LIMIT greatest(0, %s - (SELECT count(*) FROM saved_events
+                                       WHERE user_id = %s::uuid))
+               ON CONFLICT DO NOTHING''',
+            (user_id, codes, user_id, _SAVED_EVENTS_CAP, user_id),
+        )
         cursor.close()
         return jsonify({'success': True})
     except HTTPException:

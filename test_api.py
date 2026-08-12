@@ -477,6 +477,7 @@ def test_saved_events(token):
     r = requests.post(f"{BASE_URL}/api/events", json=payload, headers=auth1)
     assert r.status_code == 200, r.text
     code = r.json()['event_code']
+    code2 = None
     try:
         # Chưa đăng nhập → 401
         assert requests.get(f"{BASE_URL}/api/my-events").status_code == 401
@@ -499,6 +500,27 @@ def test_saved_events(token):
         r = requests.post(f"{BASE_URL}/api/my-events/save",
                           json={'codes': [code]}, headers=auth2)
         assert r.status_code == 200, 'save lần 2 phải idempotent'
+
+        # Batch trộn mã đã lưu + mã mới: mã đã lưu không được "ăn" mất suất
+        # LIMIT của mã mới trong cùng batch
+        payload2 = {"title": "Event thứ hai", "members": ["Bình"], "expenses": []}
+        r = requests.post(f"{BASE_URL}/api/events", json=payload2, headers=auth1)
+        assert r.status_code == 200, r.text
+        code2 = r.json()['event_code']
+        r = requests.post(f"{BASE_URL}/api/my-events/save",
+                          json={'codes': [code, code2]}, headers=auth2)
+        assert r.status_code == 200, r.text
+        r = requests.get(f"{BASE_URL}/api/my-events", headers=auth2)
+        events2 = {e['event_code']: e for e in r.json()['events']}
+        assert code in events2 and code2 in events2, \
+            'batch trộn mã đã lưu + mã mới phải lưu được cả hai'
+        assert events2[code]['owned'] is False and events2[code2]['owned'] is False
+        print("  ✅ Batch trộn mã đã lưu + mã mới: cả hai đều được lưu")
+
+        # codes rỗng → 200, không lỗi
+        r = requests.post(f"{BASE_URL}/api/my-events/save", json={'codes': []}, headers=auth2)
+        assert r.status_code == 200 and r.json().get('success')
+        print("  ✅ codes rỗng → 200")
 
         r = requests.get(f"{BASE_URL}/api/my-events", headers=auth2)
         events = {e['event_code']: e for e in r.json()['events']}
@@ -538,6 +560,8 @@ def test_saved_events(token):
     finally:
         if code:
             requests.delete(f"{BASE_URL}/api/events/{code}", headers=auth1)
+        if code2:
+            requests.delete(f"{BASE_URL}/api/events/{code2}", headers=auth1)
         delete_test_user(user2_id)
 
 def test_revisions_and_restore(token):
