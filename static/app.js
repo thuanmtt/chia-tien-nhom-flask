@@ -1657,11 +1657,17 @@
 
         // Vừa đăng nhập xong mà đang có dữ liệu nháp chưa tạo trên server → tạo luôn.
         // Đang mở event thì tải lại để server tính lại can_edit (đăng nhập → mở
-        // khóa chỉnh sửa; đăng xuất → về chỉ xem + banner).
+        // khóa chỉnh sửa; đăng xuất → về chỉ xem + banner). CHỈ tải lại khi trạng
+        // thái đăng nhập thực sự đổi — appauth:change còn bắn cả khi refresh token
+        // (~mỗi giờ), reload lúc đó sẽ xóa mất form người dùng đang nhập dở.
+        let lastAuthLoggedIn = null;
         document.addEventListener('appauth:change', function () {
-            if (AppAuth.isLoggedIn() && !currentEventCode && allowEdit && members.length > 0) {
+            const loggedIn = AppAuth.isLoggedIn();
+            const changed = lastAuthLoggedIn !== null && loggedIn !== lastAuthLoggedIn;
+            lastAuthLoggedIn = loggedIn;
+            if (loggedIn && !currentEventCode && allowEdit && members.length > 0) {
                 saveEvent(false);
-            } else if (currentEventCode) {
+            } else if (changed && currentEventCode) {
                 loadEventFromServer(currentEventCode);
             }
         });
