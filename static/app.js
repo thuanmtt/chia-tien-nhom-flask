@@ -2952,7 +2952,7 @@
 
         // Đổi vai trò tại chỗ: display (username/email) chính là identifier hợp lệ
         $(document).on('change', '.collab-role-select', function () {
-            const identifier = $(this).data('identifier');
+            const identifier = $(this).attr('data-identifier');
             if (!identifier) {
                 showToast('Không đổi được vai trò của người này.', 'error');
                 loadCollaborators();
@@ -2962,8 +2962,8 @@
         });
 
         $(document).on('click', '.collab-remove-btn', function () {
-            const userId = $(this).data('user-id');
-            const display = $(this).data('display') || 'người này';
+            const userId = $(this).attr('data-user-id');
+            const display = $(this).attr('data-display') || 'người này';
             showConfirm(`Gỡ quyền truy cập của ${display}?`, function () {
                 $.ajax({
                     url: `/api/events/${currentEventCode}/collaborators/${encodeURIComponent(userId)}`,
