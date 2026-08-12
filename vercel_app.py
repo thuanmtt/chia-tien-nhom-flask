@@ -8,7 +8,8 @@ import json
 import re
 import secrets
 import string
-from datetime import datetime
+import uuid
+from datetime import datetime, timedelta
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
@@ -836,6 +837,120 @@ def update_sharing(event_code):
         finally:
             cursor.close()
         return jsonify({'success': True, 'share_access': access, 'share_role': role})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return _server_error(e)
+
+
+@app.route('/api/events/<event_code>/revisions')
+@limiter.limit('60 per minute')
+def list_event_revisions(event_code):
+    """Lịch sử chỉnh sửa — chỉ người có quyền sửa (và đã đăng nhập) xem được.
+    Trả tối đa 200 dòng mới nhất trước, KHÔNG kèm snapshot (nặng)."""
+    try:
+        claims = request_user_claims(request)
+        if not (claims or {}).get('sub'):
+            return jsonify({'success': False, 'error': 'Vui lòng đăng nhập để xem lịch sử.'}), 401
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        permission, event_id, _unused = _check_edit_permission(cursor, event_code)
+        cursor.close()
+        if permission == 'not_found':
+            return jsonify({'success': False, 'error': 'Event not found'}), 404
+        if permission == 'forbidden':
+            return jsonify({'success': False, 'error': 'Bạn không có quyền xem lịch sử sự kiện này.'}), 403
+
+        dict_cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        revisions = list_revisions(dict_cur, event_id)
+        dict_cur.close()
+        return jsonify({'success': True, 'revisions': revisions})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return _server_error(e)
+
+
+@app.route('/api/events/<event_code>/restore', methods=['POST'])
+@limiter.limit('10 per minute; 100 per day')
+def restore_event(event_code):
+    """Khôi phục event về snapshot của một revision (kiểu lịch sử Google Docs).
+
+    Ghi snapshot cũ đè lên document hiện tại và log thêm dòng 'restore' —
+    lịch sử không bao giờ bị xóa lùi, khôi phục nhầm thì khôi phục ngược lại."""
+    try:
+        claims = request_user_claims(request)
+        if not (claims or {}).get('sub'):
+            return jsonify({'success': False, 'error': 'Vui lòng đăng nhập để chỉnh sửa.'}), 401
+
+        body = request.get_json(silent=True) or {}
+        revision_id = body.get('revision_id')
+        try:
+            uuid.UUID(str(revision_id))
+        except (ValueError, TypeError):
+            return jsonify({'success': False, 'error': 'Không tìm thấy phiên bản.'}), 404
+        expected_updated_at = body.get('expectedUpdatedAt')
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        permission, event_id, current_updated_at = _check_edit_permission(cursor, event_code)
+        if permission == 'not_found':
+            cursor.close()
+            return jsonify({'success': False, 'error': 'Event not found'}), 404
+        if permission == 'forbidden':
+            cursor.close()
+            return jsonify({'success': False, 'error': 'Bạn không có quyền chỉnh sửa sự kiện này.'}), 403
+
+        # Optimistic locking như PUT — không ghi đè âm thầm bản ai đó vừa lưu
+        # trong lúc người này mở lịch sử
+        if (expected_updated_at and current_updated_at
+                and current_updated_at.isoformat() != expected_updated_at):
+            cursor.close()
+            return jsonify({
+                'success': False,
+                'conflict': True,
+                'error': 'Sự kiện đã được cập nhật ở nơi khác.',
+            }), 409
+
+        snapshot, rev_created_at = get_revision(cursor, event_id, str(revision_id))
+        if snapshot is None:
+            cursor.close()
+            return jsonify({'success': False, 'error': 'Không tìm thấy phiên bản.'}), 404
+        try:
+            # Snapshot cũ phải qua validation hiện hành — dữ liệu từng hợp lệ
+            # có thể không còn (đổi rule) → chặn thay vì ghi bừa
+            data = validate_event_payload(snapshot)
+        except ValidationError:
+            cursor.close()
+            return jsonify({'success': False, 'error': 'Phiên bản này không còn khôi phục được.'}), 400
+
+        # Giờ VN (UTC+7, không DST) cho text lịch sử
+        vn_time = (rev_created_at + timedelta(hours=7)).strftime('%H:%M %d/%m/%Y')
+        try:
+            cursor.execute('BEGIN')
+            cursor.execute(
+                'UPDATE events SET title = %s, updated_at = now() WHERE id = %s RETURNING updated_at',
+                (data['title'], event_id),
+            )
+            new_row = cursor.fetchone()
+            replace_event_children(cursor, event_id, data)
+            actor_id, actor_name = _actor_info(cursor, claims)
+            record_revision(cursor, event_id, actor_id, actor_name, 'restore',
+                            [{'a': 'update', 'o': 'restore',
+                              't': f'Khôi phục về phiên bản lúc {vn_time}'}], data)
+            cursor.execute('COMMIT')
+        except Exception:
+            try:
+                cursor.execute('ROLLBACK')
+            except Exception:
+                # ROLLBACK có thể fail nếu connection đã chết — không che lỗi gốc
+                pass
+            raise
+        finally:
+            cursor.close()
+        new_updated_at = new_row[0].isoformat() if new_row and new_row[0] else None
+        return jsonify({'success': True, 'updated_at': new_updated_at})
     except HTTPException:
         raise
     except Exception as e:
