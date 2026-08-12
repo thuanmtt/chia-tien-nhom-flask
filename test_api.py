@@ -26,7 +26,7 @@ SUPABASE_SERVICE_ROLE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY', '')
 
 def create_test_user():
     """Tạo user test qua Admin API (service_role — CHỈ dùng trong test) và
-    đăng nhập lấy access token thật. Trả về (user_id, access_token)."""
+    đăng nhập lấy access token thật. Trả về (user_id, access_token, email)."""
     email = f'test-{secrets.token_hex(6)}@example.com'
     password = secrets.token_urlsafe(16)
     r = requests.post(
@@ -43,7 +43,7 @@ def create_test_user():
         json={'email': email, 'password': password},
     )
     assert r.status_code == 200, f'Không đăng nhập được user test: {r.status_code} {r.text}'
-    return user_id, r.json()['access_token']
+    return user_id, r.json()['access_token'], email
 
 
 def delete_test_user(user_id):
@@ -192,7 +192,7 @@ def test_update_event(event_code, edit_key, token):
     # "Có token + sai key" chỉ thật sự chạm nhánh 403 nếu token KHÔNG phải
     # owner — JWT của owner được toàn quyền bất kể edit_key (_check_edit_permission
     # khớp owner_id trước, không xét key), nên cần user thứ hai ở đây.
-    user2_id, token2 = create_test_user()
+    user2_id, token2, _email2 = create_test_user()
     try:
         return _test_update_event_body(event_code, edit_key, token, token2)
     finally:
@@ -352,7 +352,7 @@ def test_roundtrip_document(event_code, edit_key, token):
 def test_auth_matrix(token):
     """Ma trận quyền tạo/sửa: 401 vs 403, owner JWT vs edit_key."""
     print("Testing auth matrix...")
-    user2_id, token2 = create_test_user()
+    user2_id, token2, _email2 = create_test_user()
     try:
         payload = {"title": "Auth Matrix", "members": ["An"], "expenses": []}
 
@@ -516,7 +516,7 @@ def test_revisions_and_restore(token):
         print("  ✅ restore: 409 khi stale, 404 khi revision_id rác")
 
         # 6. User khác (không quyền) xem lịch sử → 403
-        user2_id, token2 = create_test_user()
+        user2_id, token2, _email2 = create_test_user()
         try:
             r = requests.get(f"{BASE_URL}/api/events/{code}/revisions",
                              headers={'Authorization': f'Bearer {token2}'})
@@ -527,6 +527,106 @@ def test_revisions_and_restore(token):
         print("✅ Revisions & restore OK")
         return True
     finally:
+        requests.delete(f"{BASE_URL}/api/events/{code}", headers=auth)
+
+def test_collaborators(token, owner_email):
+    """Người được mời đích danh: quyền cộng dồn, owner-only, resolve email/username, lịch sử."""
+    print("Testing collaborators...")
+    auth = {'Authorization': f'Bearer {token}'}
+    r = requests.post(f"{BASE_URL}/api/events",
+                      json={"title": "Collab Test", "members": ["An"], "expenses": []},
+                      headers=auth)
+    assert r.status_code == 200, r.text
+    code = r.json()['event_code']
+    user2_id, token2, email2 = create_test_user()
+    auth2 = {'Authorization': f'Bearer {token2}'}
+    try:
+        # 0. Đặt Hạn chế; user2 chưa được mời → GET 403, lookup ẩn
+        r = requests.put(f"{BASE_URL}/api/events/{code}/sharing",
+                         json={'access': 'restricted', 'role': 'viewer'}, headers=auth)
+        assert r.status_code == 200, r.text
+        r = requests.get(f"{BASE_URL}/api/events/{code}", headers=auth2)
+        assert r.status_code == 403, f'chưa được mời phải 403, được {r.status_code}'
+        r = requests.post(f"{BASE_URL}/api/events/lookup", json={'codes': [code]}, headers=auth2)
+        assert r.json()['events'] == [], 'lookup phải ẩn event restricted với người lạ'
+        print("  ✅ restricted chặn người chưa được mời")
+
+        # 1. Owner thêm user2 (email, viewer) → xem được, không sửa được, lookup thấy
+        r = requests.post(f"{BASE_URL}/api/events/{code}/collaborators",
+                          json={'identifier': email2, 'role': 'viewer'}, headers=auth)
+        assert r.status_code == 200 and r.json()['collaborator']['role'] == 'viewer', r.text
+        r = requests.get(f"{BASE_URL}/api/events/{code}", headers=auth2)
+        assert r.status_code == 200, f'viewer phải GET được, {r.status_code}'
+        ev = r.json()['event']
+        assert ev['can_edit'] is False and ev['is_owner'] is False, ev
+        put_doc = {'title': 'Collab Test', 'members': ['An'], 'expenses': [],
+                   'expectedUpdatedAt': ev['updated_at']}
+        r = requests.put(f"{BASE_URL}/api/events/{code}", json=put_doc, headers=auth2)
+        assert r.status_code == 403, f'viewer PUT phải 403, được {r.status_code}'
+        r = requests.post(f"{BASE_URL}/api/events/lookup", json={'codes': [code]}, headers=auth2)
+        assert [e['event_code'] for e in r.json()['events']] == [code], 'lookup phải thấy'
+        print("  ✅ viewer: xem được restricted, không sửa được, lookup thấy")
+
+        # 2. Đổi role editor (POST upsert) → sửa được; không xóa event; không quản lý danh sách
+        r = requests.post(f"{BASE_URL}/api/events/{code}/collaborators",
+                          json={'identifier': email2, 'role': 'editor'}, headers=auth)
+        assert r.status_code == 200 and r.json()['collaborator']['role'] == 'editor', r.text
+        r = requests.get(f"{BASE_URL}/api/events/{code}", headers=auth2)
+        ev = r.json()['event']
+        assert ev['can_edit'] is True, 'editor phải can_edit=True'
+        put_doc['expectedUpdatedAt'] = ev['updated_at']
+        put_doc['title'] = 'Collab Test sửa'
+        r = requests.put(f"{BASE_URL}/api/events/{code}", json=put_doc, headers=auth2)
+        assert r.status_code == 200, f'editor PUT phải 200, được {r.status_code}: {r.text}'
+        r = requests.delete(f"{BASE_URL}/api/events/{code}", headers=auth2)
+        assert r.status_code == 403, f'editor DELETE event phải 403, được {r.status_code}'
+        r = requests.get(f"{BASE_URL}/api/events/{code}/collaborators", headers=auth2)
+        assert r.status_code == 403, 'không phải owner không xem được danh sách'
+        print("  ✅ editor: sửa được, không xóa được event, không quản lý danh sách")
+
+        # 3. Gỡ user2 → mất quyền; thêm lại bằng USERNAME
+        uname = 'collab' + secrets.token_hex(4)
+        r = requests.put(f"{BASE_URL}/api/profile", json={'username': uname}, headers=auth2)
+        assert r.status_code == 200, r.text
+        r = requests.delete(f"{BASE_URL}/api/events/{code}/collaborators/{user2_id}", headers=auth)
+        assert r.status_code == 200, r.text
+        r = requests.get(f"{BASE_URL}/api/events/{code}", headers=auth2)
+        assert r.status_code == 403, 'gỡ xong phải mất quyền truy cập restricted'
+        r = requests.post(f"{BASE_URL}/api/events/{code}/collaborators",
+                          json={'identifier': uname, 'role': 'viewer'}, headers=auth)
+        assert r.status_code == 200 and r.json()['collaborator']['display'] == uname, r.text
+        print("  ✅ gỡ quyền + thêm lại bằng username (display = username)")
+
+        # 4. Lỗi: identifier lạ 404; thêm owner 400; role rác 400; không token 401; DELETE người lạ 404
+        r = requests.post(f"{BASE_URL}/api/events/{code}/collaborators",
+                          json={'identifier': f'khongton-{secrets.token_hex(3)}', 'role': 'viewer'},
+                          headers=auth)
+        assert r.status_code == 404, f'identifier lạ phải 404, được {r.status_code}'
+        r = requests.post(f"{BASE_URL}/api/events/{code}/collaborators",
+                          json={'identifier': owner_email, 'role': 'viewer'}, headers=auth)
+        assert r.status_code == 400, f'thêm chính owner phải 400, được {r.status_code}'
+        r = requests.post(f"{BASE_URL}/api/events/{code}/collaborators",
+                          json={'identifier': uname, 'role': 'admin'}, headers=auth)
+        assert r.status_code == 400, f'role rác phải 400, được {r.status_code}'
+        r = requests.get(f"{BASE_URL}/api/events/{code}/collaborators")
+        assert r.status_code == 401, f'không token phải 401, được {r.status_code}'
+        r = requests.delete(
+            f"{BASE_URL}/api/events/{code}/collaborators/00000000-0000-0000-0000-000000000000",
+            headers=auth)
+        assert r.status_code == 404, f'gỡ người không có phải 404, được {r.status_code}'
+        print("  ✅ 404/400/401 đúng")
+
+        # 5. Lịch sử có các dòng share tương ứng
+        r = requests.get(f"{BASE_URL}/api/events/{code}/revisions", headers=auth)
+        texts = ' | '.join(t for rev in r.json()['revisions'] for t in rev['summary'])
+        assert 'Thêm quyền truy cập cho' in texts, texts
+        assert 'Đổi vai trò của' in texts, texts
+        assert 'Xóa quyền truy cập của' in texts, texts
+        print("  ✅ lịch sử ghi thêm/đổi vai trò/gỡ")
+        print("✅ Collaborators OK")
+        return True
+    finally:
+        delete_test_user(user2_id)
         requests.delete(f"{BASE_URL}/api/events/{code}", headers=auth)
 
 def main():
@@ -540,7 +640,7 @@ def main():
     if not test_banks_api():
         return
 
-    user_id, token = create_test_user()
+    user_id, token, owner_email = create_test_user()
     try:
         event_code, edit_key = test_create_event(token)
         if not event_code:
@@ -556,6 +656,8 @@ def main():
         if not test_auth_matrix(token):
             return
         if not test_revisions_and_restore(token):
+            return
+        if not test_collaborators(token, owner_email):
             return
         if not test_delete_event(event_code, edit_key, token):
             return
