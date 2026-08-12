@@ -367,8 +367,9 @@ def lookup_events():
 @app.route('/api/my-events')
 @limiter.limit('30 per minute; 500 per day')
 def my_events():
-    """Danh sách event thuộc tài khoản đang đăng nhập — đồng bộ "Sự Kiện Của Tôi"
-    giữa các thiết bị. Chỉ trả metadata."""
+    """Danh sách "Sự Kiện Của Tôi" theo tài khoản: event sở hữu ∪ được mời
+    đích danh ∪ đã lưu (saved_events) — đồng bộ giữa các thiết bị. Chỉ trả
+    metadata + cờ owned (frontend phân biệt nút Xóa event / Gỡ khỏi danh sách)."""
     try:
         user_id = request_user_id(request)
         if not user_id:
@@ -376,9 +377,16 @@ def my_events():
         conn = get_db_connection()
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute(
-            '''SELECT event_code, title, updated_at FROM events
-               WHERE owner_id = %s::uuid ORDER BY updated_at DESC''',
-            (user_id,),
+            '''SELECT e.event_code, e.title, e.updated_at,
+                      COALESCE(e.owner_id = %s::uuid, false) AS owned
+               FROM events e
+               WHERE e.owner_id = %s::uuid
+                  OR EXISTS (SELECT 1 FROM event_collaborators c
+                             WHERE c.event_id = e.id AND c.user_id = %s::uuid)
+                  OR EXISTS (SELECT 1 FROM saved_events s
+                             WHERE s.event_id = e.id AND s.user_id = %s::uuid)
+               ORDER BY e.updated_at DESC''',
+            (user_id, user_id, user_id, user_id),
         )
         rows = cursor.fetchall()
         cursor.close()
@@ -387,6 +395,7 @@ def my_events():
                 'event_code': r['event_code'],
                 'title': r['title'],
                 'updated_at': r['updated_at'].isoformat() if r['updated_at'] else None,
+                'owned': bool(r['owned']),
             } for r in rows
         ]})
     except HTTPException:
@@ -394,6 +403,74 @@ def my_events():
     except Exception as e:
         return _server_error(e)
 
+
+@app.route('/api/my-events/save', methods=['POST'])
+@limiter.limit('30 per minute; 500 per day')
+def save_my_events():
+    """Lưu event vào "Sự Kiện Của Tôi" của tài khoản (idempotent). Body
+    {codes: [...]} tối đa 50 mã / lần — dùng cho cả lưu 1 mã khi mở event
+    lẫn migration danh sách localStorage. Mã không tồn tại bị bỏ qua."""
+    try:
+        user_id = request_user_id(request)
+        if not user_id:
+            return jsonify({'success': False, 'error': 'Vui lòng đăng nhập.'}), 401
+        body = request.get_json(silent=True)
+        codes = body.get('codes') if isinstance(body, dict) else None
+        if (not isinstance(codes, list) or len(codes) > 50
+                or not all(isinstance(c, str) and 0 < len(c) <= 64 for c in codes)):
+            return jsonify({'success': False, 'error': 'Danh sách mã sự kiện không hợp lệ.'}), 400
+        if not codes:
+            return jsonify({'success': True})
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT count(*) FROM saved_events WHERE user_id = %s::uuid', (user_id,))
+        remaining = _SAVED_EVENTS_CAP - cursor.fetchone()[0]
+        if remaining > 0:
+            # Mã trùng/đã lưu: ON CONFLICT bỏ qua. Vượt cap: cắt bớt phần thừa.
+            cursor.execute(
+                '''INSERT INTO saved_events (user_id, event_id)
+                   SELECT %s::uuid, e.id FROM events e
+                   WHERE e.event_code = ANY(%s)
+                   ORDER BY e.updated_at DESC
+                   LIMIT %s
+                   ON CONFLICT DO NOTHING''',
+                (user_id, codes, remaining),
+            )
+        cursor.close()
+        return jsonify({'success': True})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return _server_error(e)
+
+
+@app.route('/api/my-events/<event_code>', methods=['DELETE'])
+@limiter.limit('30 per minute; 500 per day')
+def unsave_my_event(event_code):
+    """Gỡ event khỏi "Sự Kiện Của Tôi" của tài khoản — KHÔNG đụng tới event.
+    Idempotent: gỡ mã không có trong danh sách vẫn trả success."""
+    try:
+        user_id = request_user_id(request)
+        if not user_id:
+            return jsonify({'success': False, 'error': 'Vui lòng đăng nhập.'}), 401
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            '''DELETE FROM saved_events s USING events e
+               WHERE s.event_id = e.id AND s.user_id = %s::uuid AND e.event_code = %s''',
+            (user_id, event_code),
+        )
+        cursor.close()
+        return jsonify({'success': True})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return _server_error(e)
+
+
+# Giới hạn số event một tài khoản lưu vào "Sự Kiện Của Tôi"
+_SAVED_EVENTS_CAP = 200
 
 # Username: 3-30 ký tự a-z 0-9 . _ - ; bắt đầu/kết thúc bằng chữ hoặc số
 _USERNAME_RE = re.compile(r'^[a-z0-9](?:[a-z0-9._-]{1,28}[a-z0-9])?$')

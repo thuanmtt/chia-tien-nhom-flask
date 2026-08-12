@@ -467,6 +467,79 @@ def test_ownerless_event(token):
                             headers={'Authorization': f'Bearer {token}'})
         delete_test_user(user2_id)
 
+def test_saved_events(token):
+    """saved_events: lưu/gỡ event vào danh sách tài khoản + my-events hợp nhất với cờ owned."""
+    print("Testing saved events (Sự Kiện Của Tôi theo tài khoản)...")
+    user2_id, token2, _email2 = create_test_user()
+    auth1 = {'Authorization': f'Bearer {token}'}
+    auth2 = {'Authorization': f'Bearer {token2}'}
+    payload = {"title": "Event để lưu", "members": ["An"], "expenses": []}
+    r = requests.post(f"{BASE_URL}/api/events", json=payload, headers=auth1)
+    assert r.status_code == 200, r.text
+    code = r.json()['event_code']
+    try:
+        # Chưa đăng nhập → 401
+        assert requests.get(f"{BASE_URL}/api/my-events").status_code == 401
+        assert requests.post(f"{BASE_URL}/api/my-events/save",
+                             json={'codes': [code]}).status_code == 401
+        assert requests.delete(f"{BASE_URL}/api/my-events/{code}").status_code == 401
+        print("  ✅ Cả 3 endpoint chặn 401 khi chưa đăng nhập")
+
+        # Body sai → 400 (mã không tồn tại thì bỏ qua, không lỗi)
+        for bad in ({'codes': 'abc'}, {'codes': [123]}, {}, {'codes': ['x' * 65]}):
+            r = requests.post(f"{BASE_URL}/api/my-events/save", json=bad, headers=auth2)
+            assert r.status_code == 400, f'save với {bad} phải 400, được {r.status_code}'
+        print("  ✅ Validate body save")
+
+        # user2 lưu event của user1 (kèm 1 mã không tồn tại — bị bỏ qua êm)
+        r = requests.post(f"{BASE_URL}/api/my-events/save",
+                          json={'codes': [code, 'KHONG-TON-TAI']}, headers=auth2)
+        assert r.status_code == 200 and r.json().get('success'), r.text
+        # Lưu lần 2 phải idempotent
+        r = requests.post(f"{BASE_URL}/api/my-events/save",
+                          json={'codes': [code]}, headers=auth2)
+        assert r.status_code == 200, 'save lần 2 phải idempotent'
+
+        r = requests.get(f"{BASE_URL}/api/my-events", headers=auth2)
+        events = {e['event_code']: e for e in r.json()['events']}
+        assert code in events, 'my-events của user2 phải chứa event đã lưu'
+        assert events[code]['owned'] is False, 'event lưu hộ không phải owned'
+        assert 'KHONG-TON-TAI' not in events
+        print("  ✅ Lưu event + my-events trả owned=False cho event không sở hữu")
+
+        # my-events của owner: owned=True (không cần lưu tay)
+        r = requests.get(f"{BASE_URL}/api/my-events", headers=auth1)
+        events = {e['event_code']: e for e in r.json()['events']}
+        assert code in events and events[code]['owned'] is True, 'owner phải thấy owned=True'
+        print("  ✅ my-events của owner có owned=True")
+
+        # Gỡ khỏi danh sách: mất khỏi my-events của user2, event vẫn còn
+        r = requests.delete(f"{BASE_URL}/api/my-events/{code}", headers=auth2)
+        assert r.status_code == 200 and r.json().get('success')
+        r = requests.get(f"{BASE_URL}/api/my-events", headers=auth2)
+        assert code not in [e['event_code'] for e in r.json()['events']]
+        assert requests.get(f"{BASE_URL}/api/events/{code}").status_code == 200, \
+            'unsave không được xóa event'
+        # Gỡ lần nữa vẫn 200 (idempotent)
+        assert requests.delete(f"{BASE_URL}/api/my-events/{code}",
+                               headers=auth2).status_code == 200
+        print("  ✅ Gỡ khỏi danh sách không đụng event, idempotent")
+
+        # Xóa event → dòng saved_events mất theo (CASCADE): lưu lại rồi xóa event
+        requests.post(f"{BASE_URL}/api/my-events/save", json={'codes': [code]}, headers=auth2)
+        r = requests.delete(f"{BASE_URL}/api/events/{code}", headers=auth1)
+        assert r.status_code == 200
+        r = requests.get(f"{BASE_URL}/api/my-events", headers=auth2)
+        assert code not in [e['event_code'] for e in r.json()['events']], \
+            'event đã xóa không được còn trong danh sách đã lưu'
+        code = None
+        print("✅ Saved events OK")
+        return True
+    finally:
+        if code:
+            requests.delete(f"{BASE_URL}/api/events/{code}", headers=auth1)
+        delete_test_user(user2_id)
+
 def test_revisions_and_restore(token):
     """Lịch sử chỉnh sửa: ghi đúng diff, squash lưu liên tiếp, khôi phục phiên bản."""
     print("Testing revisions & restore...")
@@ -694,6 +767,8 @@ def main():
         if not test_auth_matrix(token):
             return
         if not test_ownerless_event(token):
+            return
+        if not test_saved_events(token):
             return
         if not test_revisions_and_restore(token):
             return
