@@ -87,6 +87,13 @@
 <div class="container mt-4">
     <div class="row">
         <div class="col-lg-8 mx-auto">
+            <div id="loginToEditBanner" class="alert alert-info d-none">
+                <i class="fas fa-lock me-1"></i>
+                Bạn có quyền chỉnh sửa sự kiện này — đăng nhập để bắt đầu chỉnh sửa.
+                <button type="button" class="btn btn-sm btn-primary ms-2" id="loginToEditBtn">
+                    <i class="fas fa-sign-in-alt me-1"></i>Đăng nhập
+                </button>
+            </div>
             <div class="card mb-4">
                 <div class="card-header bg-white group-header">
                     <div class="d-flex justify-content-between align-items-center flex-wrap flex-md-nowrap">
@@ -106,6 +113,9 @@
                             </button>
                             <button class="btn btn-sm btn-outline-primary me-2 mb-1 mb-md-0" id="saveEventBtn">
                                 <i class="fas fa-save me-1"></i> Lưu
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary me-2 mb-1 mb-md-0" id="historyBtn">
+                                <i class="fas fa-clock-rotate-left me-1"></i> Lịch sử
                             </button>
                             <button class="btn btn-sm btn-outline-success me-2" id="shareEventBtn">
                                 <i class="fas fa-share-alt me-1"></i> Chia sẻ
@@ -714,6 +724,24 @@
                     </div>
                     <button type="submit" class="btn btn-primary w-100">Lưu mật khẩu</button>
                 </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal lịch sử chỉnh sửa (phải đứng TRƯỚC confirmModal — confirmModal cần stack trên cùng) -->
+<div class="modal fade" id="historyModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-clock-rotate-left me-2"></i>Lịch sử chỉnh sửa</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="text-center text-muted py-3 d-none" id="historyLoading">
+                    <i class="fas fa-circle-notch fa-spin me-1"></i> Đang tải lịch sử...
+                </div>
+                <ul class="list-group" id="historyList"></ul>
             </div>
         </div>
     </div>

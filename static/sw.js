@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v4';
+const CACHE_VERSION = 'v5';
 const STATIC_CACHE = `chia-tien-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `chia-tien-runtime-${CACHE_VERSION}`;
 

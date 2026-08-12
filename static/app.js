@@ -216,6 +216,7 @@
                 $('#configRatesBtn').hide();
                 $('#saveEventBtn').hide();
                 $('#shareEventBtn').hide();
+                $('#historyBtn').hide();
                 $('#memberForm').hide();
                 $('#expenseForm').hide();
                 $('#calculateBtn').hide();
@@ -242,6 +243,7 @@
                 $('#configBankInfoBtn').show();
                 $('#saveEventBtn').show();
                 $('#shareEventBtn').show();
+                $('#historyBtn').show();
                 $('#memberForm').show();
                 $('#expenseForm').show();
                 $('#calculateBtn').show();
@@ -524,6 +526,7 @@
             currentEventCode = null;
             lastKnownUpdatedAt = null;
             allowEdit = true; // sự kiện mới do chính mình tạo
+            $('#loginToEditBanner').addClass('d-none');
             shareAccess = 'link';   // mặc định: bất kỳ ai có đường liên kết
             shareRole = 'viewer';   // với vai trò Người xem
             setSaveStatus('');
@@ -703,7 +706,12 @@
                     },
                     error: function(xhr) {
                         setSaveStatus('error');
-                        if (xhr.status === 403) {
+                        if (xhr.status === 401) {
+                            // Phiên đăng nhập hết hạn giữa chừng — KHÔNG về chỉ-xem,
+                            // giữ nguyên dữ liệu trên trang; đăng nhập xong lưu lại được
+                            showToast('Vui lòng đăng nhập để chỉnh sửa sự kiện.', 'warning');
+                            AppAuth.showLoginModal();
+                        } else if (xhr.status === 403) {
                             // Khóa không còn hợp lệ → chuyển giao diện về chế độ chỉ xem
                             showToast('Bạn không có quyền chỉnh sửa sự kiện này — chuyển về chế độ chỉ xem.', 'error');
                             removeEditKey(currentEventCode);
@@ -777,9 +785,14 @@
                         // Quyền chỉnh sửa do server xác nhận
                         if (opts.forceViewOnly) {
                             allowEdit = false;
+                            $('#loginToEditBanner').addClass('d-none');
                         } else {
                             allowEdit = !!eventData.can_edit;
-                            if (!allowEdit && storedKey) {
+                            // Có quyền sửa nhưng chưa đăng nhập → banner mời đăng nhập,
+                            // KHÔNG xóa key (key vẫn đúng, chỉ thiếu đăng nhập)
+                            const loginRequired = !!eventData.login_required_to_edit;
+                            $('#loginToEditBanner').toggleClass('d-none', !loginRequired);
+                            if (!allowEdit && storedKey && !loginRequired) {
                                 // Khóa sai hoặc đã bị đổi — bỏ khóa hỏng, chuyển chỉ xem
                                 removeEditKey(eventCode);
                                 showToast('Khóa chỉnh sửa không đúng — đang mở ở chế độ chỉ xem.', 'warning');
@@ -1642,11 +1655,19 @@
             }
         }
 
-        // Vừa đăng nhập xong mà đang có dữ liệu nháp chưa tạo trên server → tạo luôn
+        // Vừa đăng nhập xong mà đang có dữ liệu nháp chưa tạo trên server → tạo luôn.
+        // Đang mở event thì tải lại để server tính lại can_edit (đăng nhập → mở
+        // khóa chỉnh sửa; đăng xuất → về chỉ xem + banner).
         document.addEventListener('appauth:change', function () {
             if (AppAuth.isLoggedIn() && !currentEventCode && allowEdit && members.length > 0) {
                 saveEvent(false);
+            } else if (currentEventCode) {
+                loadEventFromServer(currentEventCode);
             }
+        });
+
+        $(document).on('click', '#loginToEditBtn', function () {
+            AppAuth.showLoginModal();
         });
 
         // Tính tổng chi phí của một sự kiện (quy đổi về VND theo rates riêng của sự kiện)
@@ -2594,6 +2615,118 @@
                 showToast('Đã tạo sự kiện mới!', 'success');
             }, { okLabel: 'Tạo mới', okClass: 'btn-primary' });
         });
+
+        // ===== Lịch sử chỉnh sửa =====
+        const REVISION_KIND_BADGE = {
+            create: '<span class="badge bg-primary me-1">Tạo</span>',
+            restore: '<span class="badge bg-warning text-dark me-1">Khôi phục</span>',
+            share: '<span class="badge bg-info text-dark me-1">Chia sẻ</span>'
+        };
+
+        function formatRevisionTime(iso) {
+            const d = new Date(iso);
+            if (isNaN(d.getTime())) return '';
+            const pad = n => String(n).padStart(2, '0');
+            return `${pad(d.getHours())}:${pad(d.getMinutes())} ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+        }
+
+        function renderHistory(revisions) {
+            const $list = $('#historyList').empty();
+            if (!revisions.length) {
+                $list.append('<li class="list-group-item text-muted">Chưa có lịch sử chỉnh sửa.</li>');
+                return;
+            }
+            revisions.forEach((rev, idx) => {
+                // XSS: actor_name là username tự đặt, summary chứa tên chi phí/
+                // thành viên người dùng nhập — tất cả phải qua escapeHtml
+                const badge = REVISION_KIND_BADGE[rev.kind] || '';
+                const summaryHtml = (rev.summary || [])
+                    .map(t => `<div class="small text-body-secondary">${escapeHtml(t)}</div>`).join('');
+                const restoreBtn = idx === 0 ? '' : `
+                    <button class="btn btn-sm btn-outline-warning history-restore-btn"
+                            data-id="${escapeHtml(rev.id)}" data-time="${escapeHtml(rev.created_at || '')}">
+                        <i class="fas fa-rotate-left me-1"></i>Khôi phục
+                    </button>`;
+                $list.append(`
+                    <li class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <div>${badge}<strong>${escapeHtml(rev.actor_name || 'Không rõ')}</strong>
+                                    <span class="text-muted small ms-1">${escapeHtml(formatRevisionTime(rev.created_at))}</span>
+                                </div>
+                                ${summaryHtml}
+                            </div>
+                            <div class="ms-2 flex-shrink-0">${restoreBtn}</div>
+                        </div>
+                    </li>`);
+            });
+        }
+
+        function loadHistory() {
+            $('#historyLoading').removeClass('d-none');
+            $('#historyList').empty();
+            $.ajax({
+                url: `/api/events/${currentEventCode}/revisions`,
+                headers: AppAuth.authHeaders({ 'X-Edit-Key': getOrCreateEditKey(currentEventCode) }),
+                success: function (res) {
+                    $('#historyLoading').addClass('d-none');
+                    if (res.success) renderHistory(res.revisions || []);
+                },
+                error: function (xhr) {
+                    $('#historyLoading').addClass('d-none');
+                    if (xhr.status === 401) {
+                        showToast('Vui lòng đăng nhập để xem lịch sử.', 'warning');
+                        AppAuth.showLoginModal();
+                    } else {
+                        showToast('Không tải được lịch sử chỉnh sửa.', 'error');
+                    }
+                }
+            });
+        }
+
+        $('#historyBtn').on('click', function () {
+            if (!allowEdit || !currentEventCode) return;
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('historyModal')).show();
+            loadHistory();
+        });
+
+        $(document).on('click', '.history-restore-btn', function () {
+            const revisionId = $(this).data('id');
+            const timeLabel = formatRevisionTime(String($(this).data('time') || ''));
+            showConfirm(
+                `Khôi phục sự kiện về phiên bản lúc ${timeLabel}? Nội dung hiện tại sẽ được thay bằng bản này (thao tác khôi phục cũng được ghi vào lịch sử).`,
+                function () {
+                    $.ajax({
+                        url: `/api/events/${currentEventCode}/restore`,
+                        method: 'POST',
+                        contentType: 'application/json',
+                        headers: AppAuth.authHeaders({ 'X-Edit-Key': getOrCreateEditKey(currentEventCode) }),
+                        data: JSON.stringify({ revision_id: revisionId, expectedUpdatedAt: lastKnownUpdatedAt }),
+                        success: function (res) {
+                            if (res.success) {
+                                bootstrap.Modal.getOrCreateInstance(document.getElementById('historyModal')).hide();
+                                showToast('Đã khôi phục sự kiện về phiên bản đã chọn.', 'success');
+                                loadEventFromServer(currentEventCode);
+                            }
+                        },
+                        error: function (xhr) {
+                            if (xhr.status === 409) {
+                                showToast('Sự kiện vừa được cập nhật ở nơi khác — đang tải lại.', 'warning');
+                                loadEventFromServer(currentEventCode);
+                                loadHistory();
+                            } else if (xhr.status === 401) {
+                                showToast('Vui lòng đăng nhập để khôi phục.', 'warning');
+                                AppAuth.showLoginModal();
+                            } else {
+                                showToast('Không khôi phục được phiên bản này.', 'error');
+                            }
+                        }
+                    });
+                },
+                { okLabel: 'Khôi phục', okClass: 'btn-warning' }
+            );
+        });
+        // ===== Hết phần lịch sử chỉnh sửa =====
 
         // Modal xác nhận thống nhất thay cho confirm() native
         let _confirmCallback = null;
