@@ -168,3 +168,7 @@
     gap: 12px;
     z-index: 3000;
 }
+/* Chữ số đều nhau để % không làm dòng chữ nhấp nháy khi thay đổi */
+#appLoadingPercent {
+    font-variant-numeric: tabular-nums;
+}

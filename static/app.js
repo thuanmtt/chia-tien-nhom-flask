@@ -156,8 +156,23 @@
         // Quyền chỉnh sửa do SERVER quyết định: GET event trả về cờ can_edit
         // dựa trên khóa X-Edit-Key gửi kèm. Có khóa hợp lệ → giao diện chỉnh sửa,
         // không có/sai khóa → giao diện chỉ xem (loadEventFromServer xử lý).
-        // Overlay loading toàn trang khi đang tải sự kiện từ link
+        // Overlay loading toàn trang khi đang tải sự kiện từ link.
+        // % chỉ là mô phỏng (nhanh lúc đầu, chậm dần về ~95%) — cả quá trình tải
+        // chỉ có 1 request nên không đo được tiến độ thật.
+        let appLoadingTimer = null;
         function showAppLoading(show) {
+            if (appLoadingTimer) {
+                clearInterval(appLoadingTimer);
+                appLoadingTimer = null;
+            }
+            if (show) {
+                let percent = 0;
+                $('#appLoadingPercent').text('0%');
+                appLoadingTimer = setInterval(function () {
+                    percent = Math.min(95, percent + Math.max(0.3, (95 - percent) * 0.08));
+                    $('#appLoadingPercent').text(Math.floor(percent) + '%');
+                }, 180);
+            }
             $('#appLoading').toggleClass('d-none', !show);
         }
 
