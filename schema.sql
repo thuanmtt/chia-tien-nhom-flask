@@ -115,6 +115,19 @@ CREATE TABLE IF NOT EXISTS event_revisions (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Người được mời đích danh (kiểu "Những người có quyền truy cập" của Google Docs).
+-- Quyền CỘNG DỒN với quyền chung theo link + edit_key; chỉ owner quản lý danh sách.
+-- user_id/added_by là user Supabase Auth — không FK auth.users (giống owner_id)
+-- để schema chạy được trên Postgres thường khi dev/test.
+CREATE TABLE IF NOT EXISTS event_collaborators (
+    event_id   uuid NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    user_id    uuid NOT NULL,
+    role       text NOT NULL DEFAULT 'viewer', -- 'viewer' | 'editor'
+    added_by   uuid,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (event_id, user_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_events_event_code ON events (event_code);
 CREATE INDEX IF NOT EXISTS idx_events_owner_id   ON events (owner_id);
 CREATE INDEX IF NOT EXISTS idx_events_updated_at ON events (updated_at DESC);
@@ -125,6 +138,7 @@ CREATE INDEX IF NOT EXISTS idx_couples_event_id          ON couples (event_id);
 CREATE INDEX IF NOT EXISTS idx_event_rates_event_id      ON event_rates (event_id);
 CREATE INDEX IF NOT EXISTS idx_event_revisions_event_created
     ON event_revisions (event_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_event_collaborators_user ON event_collaborators (user_id);
 
 -- Supabase expose PostgREST công khai với anon key → bật RLS, KHÔNG tạo policy
 -- (deny-all cho anon/authenticated). Flask kết nối bằng role postgres (owner của
@@ -139,3 +153,4 @@ ALTER TABLE couple_members        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE event_rates           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_profiles         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE event_revisions       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE event_collaborators   ENABLE ROW LEVEL SECURITY;
