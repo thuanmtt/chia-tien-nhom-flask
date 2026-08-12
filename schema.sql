@@ -98,6 +98,23 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Lịch sử chỉnh sửa: mỗi lần ghi (tạo/sửa/khôi phục/đổi chia sẻ) một dòng.
+-- snapshot = CẢ document (title + members + expenses + bankInfo + couples +
+-- rates) SAU hành động → "khôi phục về bản này" = ghi lại snapshot của dòng đó.
+-- actor_id là user Supabase Auth (mọi thao tác ghi giờ bắt buộc đăng nhập);
+-- actor_name denormalize (username/email tại thời điểm đó) để đọc không phải
+-- join auth.users và tên còn nguyên nếu tài khoản đổi/xóa.
+CREATE TABLE IF NOT EXISTS event_revisions (
+    id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id   uuid NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    actor_id   uuid NOT NULL,
+    actor_name text NOT NULL DEFAULT '',
+    kind       text NOT NULL DEFAULT 'edit', -- 'create' | 'edit' | 'restore' | 'share'
+    summary    jsonb NOT NULL DEFAULT '[]',
+    snapshot   jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_events_event_code ON events (event_code);
 CREATE INDEX IF NOT EXISTS idx_events_owner_id   ON events (owner_id);
 CREATE INDEX IF NOT EXISTS idx_events_updated_at ON events (updated_at DESC);
@@ -106,6 +123,8 @@ CREATE INDEX IF NOT EXISTS idx_expenses_event_id         ON expenses (event_id);
 CREATE INDEX IF NOT EXISTS idx_member_bank_info_event_id ON member_bank_info (event_id);
 CREATE INDEX IF NOT EXISTS idx_couples_event_id          ON couples (event_id);
 CREATE INDEX IF NOT EXISTS idx_event_rates_event_id      ON event_rates (event_id);
+CREATE INDEX IF NOT EXISTS idx_event_revisions_event_created
+    ON event_revisions (event_id, created_at DESC);
 
 -- Supabase expose PostgREST công khai với anon key → bật RLS, KHÔNG tạo policy
 -- (deny-all cho anon/authenticated). Flask kết nối bằng role postgres (owner của
@@ -119,3 +138,4 @@ ALTER TABLE couples               ENABLE ROW LEVEL SECURITY;
 ALTER TABLE couple_members        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE event_rates           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_profiles         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE event_revisions       ENABLE ROW LEVEL SECURITY;
