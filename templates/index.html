@@ -392,6 +392,20 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
+                <div id="collabSection" class="mb-3 d-none">
+                    <label class="form-label fw-semibold">Những người có quyền truy cập</label>
+                    <div class="d-flex gap-2 mb-2">
+                        <input type="text" class="form-control" id="collabIdentifierInput"
+                               placeholder="Email hoặc username" autocomplete="off">
+                        <select class="form-select w-auto flex-shrink-0" id="collabRoleSelect">
+                            <option value="viewer">Người xem</option>
+                            <option value="editor">Người chỉnh sửa</option>
+                        </select>
+                        <button type="button" class="btn btn-primary flex-shrink-0" id="collabAddBtn">Thêm</button>
+                    </div>
+                    <div id="collabList" class="list-group list-group-flush"></div>
+                    <hr>
+                </div>
                 <label class="form-label fw-semibold">Quyền truy cập chung</label>
                 <div class="d-flex align-items-center gap-2">
                     <span class="d-inline-flex align-items-center justify-content-center rounded-circle bg-light"

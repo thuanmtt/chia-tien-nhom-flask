@@ -36,6 +36,7 @@
         // Chia sẻ kiểu Google Docs: 'restricted' | 'link' + vai trò 'viewer' | 'editor'
         let shareAccess = 'link';
         let shareRole = 'viewer';
+        let isOwner = false;    // chủ sở hữu event hiện tại (quản lý người được mời)
 
         // Escape HTML để chống XSS khi render dữ liệu người dùng
         // (tên thành viên, tiêu đề chi phí, tên sự kiện, tên nhóm...)
@@ -529,6 +530,7 @@
             $('#loginToEditBanner').addClass('d-none');
             shareAccess = 'link';   // mặc định: bất kỳ ai có đường liên kết
             shareRole = 'viewer';   // với vai trò Người xem
+            isOwner = true;     // sự kiện mới do chính mình tạo
             setSaveStatus('');
             $('#eventTitle').text('Sự Kiện Mới');
             $('#eventCodeDisplay').text('');
@@ -747,6 +749,7 @@
                                 setEditKey(currentEventCode, response.edit_key);
                             }
                             lastKnownUpdatedAt = response.updated_at || null;
+                            isOwner = true; // người tạo là chủ sở hữu
                             setSaveStatus('saved');
                             if (showAlert) {
                                 showToast('Sự kiện đã được tạo thành công và thêm vào danh sách của bạn!', 'success');
@@ -804,6 +807,7 @@
                         // Cài đặt chia sẻ hiện tại (cho modal Chia sẻ)
                         shareAccess = eventData.share_access || 'link';
                         shareRole = eventData.share_role || 'viewer';
+                        isOwner = !!eventData.is_owner;
                         setSaveStatus(''); // dữ liệu vừa tải, chưa có thay đổi cần lưu
 
                         // Cập nhật tên sự kiện
@@ -2861,6 +2865,125 @@
             }
         }
 
+        // ===== Người có quyền truy cập (chỉ owner thấy/quản lý) =====
+        function renderCollaborators(collaborators) {
+            const $list = $('#collabList').empty();
+            $list.append(`
+                <div class="list-group-item d-flex justify-content-between align-items-center px-0">
+                    <span><i class="fas fa-user-circle me-2 text-secondary"></i>Bạn (chủ sở hữu)</span>
+                    <span class="text-muted small">Chủ sở hữu</span>
+                </div>`);
+            (collaborators || []).forEach(c => {
+                // XSS: display là username tự đặt hoặc email — phải escape,
+                // kể cả khi đưa vào data-attribute
+                const safeId = escapeHtml(c.user_id);
+                const safeDisplay = escapeHtml(c.display || 'Không rõ');
+                $list.append(`
+                    <div class="list-group-item d-flex justify-content-between align-items-center gap-2 px-0">
+                        <span class="text-truncate"><i class="fas fa-user me-2 text-secondary"></i>${safeDisplay}</span>
+                        <span class="d-flex align-items-center gap-1 flex-shrink-0">
+                            <select class="form-select form-select-sm w-auto collab-role-select"
+                                    data-identifier="${escapeHtml(c.display || '')}">
+                                <option value="viewer"${c.role === 'viewer' ? ' selected' : ''}>Người xem</option>
+                                <option value="editor"${c.role === 'editor' ? ' selected' : ''}>Người chỉnh sửa</option>
+                            </select>
+                            <button type="button" class="btn btn-sm btn-outline-danger collab-remove-btn"
+                                    data-user-id="${safeId}" data-display="${escapeHtml(c.display || '')}"
+                                    title="Gỡ quyền truy cập">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </span>
+                    </div>`);
+            });
+        }
+
+        function loadCollaborators() {
+            $.ajax({
+                url: `/api/events/${currentEventCode}/collaborators`,
+                headers: AppAuth.authHeaders(),
+                success: function (res) {
+                    if (res.success) renderCollaborators(res.collaborators || []);
+                },
+                error: function (xhr) {
+                    if (xhr.status === 401) {
+                        AppAuth.showLoginModal();
+                    } else {
+                        showToast('Không tải được danh sách người có quyền truy cập.', 'error');
+                    }
+                }
+            });
+        }
+
+        function upsertCollaborator(identifier, role, onDone) {
+            $.ajax({
+                url: `/api/events/${currentEventCode}/collaborators`,
+                method: 'POST',
+                contentType: 'application/json',
+                headers: AppAuth.authHeaders(),
+                data: JSON.stringify({ identifier: identifier, role: role }),
+                success: function () {
+                    loadCollaborators();
+                    if (onDone) onDone(true);
+                },
+                error: function (xhr) {
+                    // 404/400 có message tiếng Việt cụ thể từ server
+                    showToast((xhr.responseJSON && xhr.responseJSON.error)
+                        || 'Không thêm được người này, vui lòng thử lại.', 'error');
+                    if (xhr.status === 401) {
+                        AppAuth.showLoginModal();
+                    } else {
+                        loadCollaborators(); // đồng bộ lại UI (ví dụ dropdown role vừa đổi hụt)
+                    }
+                    if (onDone) onDone(false);
+                }
+            });
+        }
+
+        $('#collabAddBtn').on('click', function () {
+            const identifier = $('#collabIdentifierInput').val().trim();
+            if (!identifier) return;
+            upsertCollaborator(identifier, $('#collabRoleSelect').val(), function (ok) {
+                if (ok) {
+                    $('#collabIdentifierInput').val('');
+                    showToast('Đã thêm quyền truy cập.', 'success');
+                }
+            });
+        });
+
+        // Đổi vai trò tại chỗ: display (username/email) chính là identifier hợp lệ
+        $(document).on('change', '.collab-role-select', function () {
+            const identifier = $(this).data('identifier');
+            if (!identifier) {
+                showToast('Không đổi được vai trò của người này.', 'error');
+                loadCollaborators();
+                return;
+            }
+            upsertCollaborator(identifier, $(this).val(), null);
+        });
+
+        $(document).on('click', '.collab-remove-btn', function () {
+            const userId = $(this).data('user-id');
+            const display = $(this).data('display') || 'người này';
+            showConfirm(`Gỡ quyền truy cập của ${display}?`, function () {
+                $.ajax({
+                    url: `/api/events/${currentEventCode}/collaborators/${encodeURIComponent(userId)}`,
+                    method: 'DELETE',
+                    headers: AppAuth.authHeaders(),
+                    success: function () {
+                        showToast('Đã gỡ quyền truy cập.', 'success');
+                        loadCollaborators();
+                    },
+                    error: function (xhr) {
+                        if (xhr.status === 401) {
+                            AppAuth.showLoginModal();
+                            return;
+                        }
+                        showToast('Không gỡ được quyền truy cập, vui lòng thử lại.', 'error');
+                    }
+                });
+            }, { okLabel: 'Gỡ', okClass: 'btn-danger' });
+        });
+
         function saveShareSettings(access, role) {
             const prevAccess = shareAccess, prevRole = shareRole;
             shareAccess = access;
@@ -2891,6 +3014,8 @@
                 return;
             }
             renderShareModal();
+            $('#collabSection').toggleClass('d-none', !isOwner);
+            if (isOwner) loadCollaborators();
             $('#shareEventModal').modal('show');
         });
 
