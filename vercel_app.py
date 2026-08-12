@@ -16,6 +16,8 @@ from werkzeug.exceptions import HTTPException
 
 from validation import ValidationError, validate_event_payload
 from event_store import replace_event_children, load_event_children, load_events_summary
+from revision_diff import diff_documents
+from revision_store import record_revision, list_revisions, get_revision
 from supabase_auth import request_user_id, request_user_claims
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -121,6 +123,40 @@ def _check_edit_permission(cursor, event_code, allow_link_editor=True):
     return 'ok', event_id, updated_at
 
 
+def _actor_info(cursor, claims):
+    """(user_id, tên hiển thị) của người thực hiện — cho lịch sử chỉnh sửa.
+    Ưu tiên username (user_profiles), không có thì email từ JWT. Denormalize
+    vào từng revision để đọc lịch sử không phải join auth.users."""
+    user_id = claims.get('sub')
+    cursor.execute('SELECT username FROM user_profiles WHERE user_id = %s::uuid', (user_id,))
+    row = cursor.fetchone()
+    name = (row[0] if row and row[0] else None) or claims.get('email') or ''
+    return user_id, name
+
+
+def _load_full_document(conn, cursor, event_id):
+    """Document đầy đủ (title + children) của event — cho diff/snapshot lịch sử.
+    Mở RealDictCursor riêng vì load_event_children yêu cầu dict cursor; cùng
+    connection nên vẫn nằm trong transaction đang mở của caller."""
+    cursor.execute('SELECT title FROM events WHERE id = %s', (event_id,))
+    title = cursor.fetchone()[0]
+    dict_cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        doc = load_event_children(dict_cur, event_id)
+    finally:
+        dict_cur.close()
+    return dict(doc, title=title)
+
+
+# Nhãn tiếng Việt cho revision 'share' (khớp các giá trị validate ở update_sharing)
+_SHARE_LABEL = {
+    ('restricted', 'viewer'): 'Hạn chế',
+    ('restricted', 'editor'): 'Hạn chế',
+    ('link', 'viewer'): 'Bất kỳ ai có liên kết — người xem',
+    ('link', 'editor'): 'Bất kỳ ai có liên kết — người chỉnh sửa',
+}
+
+
 def _database_url():
     url = (
         os.environ.get('DATABASE_URL')
@@ -210,6 +246,9 @@ def create_event():
             )
             event_id, created_updated_at = cursor.fetchone()
             replace_event_children(cursor, event_id, data)
+            actor_id, actor_name = _actor_info(cursor, claims)
+            record_revision(cursor, event_id, actor_id, actor_name, 'create',
+                            [{'a': 'add', 'o': 'event', 't': 'Tạo sự kiện'}], data)
             cursor.execute('COMMIT')
         except Exception:
             try:
@@ -536,12 +575,18 @@ def update_event(event_code):
 
         try:
             cursor.execute('BEGIN')
+            # Bản cũ phải đọc TRONG transaction, trước khi ghi đè — để diff cho lịch sử
+            old_doc = _load_full_document(conn, cursor, event_id)
             cursor.execute(
                 'UPDATE events SET title = %s, updated_at = now() WHERE id = %s RETURNING updated_at',
                 (data['title'], event_id),
             )
             new_row = cursor.fetchone()
             replace_event_children(cursor, event_id, data)
+            summary = diff_documents(old_doc, data)
+            if summary:  # lưu không đổi gì (no-op) → không ghi dòng lịch sử
+                actor_id, actor_name = _actor_info(cursor, claims)
+                record_revision(cursor, event_id, actor_id, actor_name, 'edit', summary, data)
             cursor.execute('COMMIT')
         except Exception:
             try:
@@ -766,11 +811,30 @@ def update_sharing(event_code):
             cursor.close()
             return jsonify({'success': False, 'error': 'Bạn không có quyền thay đổi chia sẻ của sự kiện này.'}), 403
 
-        cursor.execute(
-            'UPDATE events SET share_access = %s, share_role = %s WHERE id = %s',
-            (access, role, event_id),
-        )
-        cursor.close()
+        try:
+            cursor.execute('BEGIN')
+            cursor.execute(
+                'UPDATE events SET share_access = %s, share_role = %s WHERE id = %s',
+                (access, role, event_id),
+            )
+            # Đổi chia sẻ cũng là hành động cần trace — snapshot là document
+            # hiện tại (nội dung không đổi, restore về dòng này vẫn đúng nghĩa)
+            snapshot = _load_full_document(conn, cursor, event_id)
+            actor_id, actor_name = _actor_info(cursor, claims)
+            record_revision(cursor, event_id, actor_id, actor_name, 'share',
+                            [{'a': 'update', 'o': 'sharing',
+                              't': f'Đổi quyền truy cập: {_SHARE_LABEL[(access, role)]}'}],
+                            snapshot)
+            cursor.execute('COMMIT')
+        except Exception:
+            try:
+                cursor.execute('ROLLBACK')
+            except Exception:
+                # ROLLBACK có thể fail nếu connection đã chết — không che lỗi gốc
+                pass
+            raise
+        finally:
+            cursor.close()
         return jsonify({'success': True, 'share_access': access, 'share_role': role})
     except HTTPException:
         raise
