@@ -683,7 +683,8 @@
                             showToast('Vui lòng đăng nhập để chỉnh sửa sự kiện.', 'warning');
                             AppAuth.showLoginModal();
                         } else if (xhr.status === 403) {
-                            // Khóa không còn hợp lệ → chuyển giao diện về chế độ chỉ xem
+                            // Server từ chối quyền (bị gỡ khỏi danh sách mời / chế độ
+                            // chia sẻ đổi) → chuyển giao diện về chế độ chỉ xem
                             showToast('Bạn không có quyền chỉnh sửa sự kiện này — chuyển về chế độ chỉ xem.', 'error');
                             allowEdit = false;
                             updateUIForEditMode();
@@ -1616,8 +1617,8 @@
         }
 
         // Vừa đăng nhập xong mà đang có dữ liệu nháp chưa tạo trên server → tạo luôn.
-        // Đang mở event thì tải lại để server tính lại can_edit (đăng nhập → mở
-        // khóa chỉnh sửa; đăng xuất → về chỉ xem + banner). CHỈ tải lại khi trạng
+        // Đang mở event thì tải lại để server tính lại can_edit (đăng nhập → cho
+        // phép chỉnh sửa; đăng xuất → về chỉ xem + banner). CHỈ tải lại khi trạng
         // thái đăng nhập thực sự đổi — appauth:change còn bắn cả khi refresh token
         // (~mỗi giờ), reload lúc đó sẽ xóa mất form người dùng đang nhập dở.
         let lastAuthLoggedIn = null;
