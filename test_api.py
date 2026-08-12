@@ -23,6 +23,18 @@ SUPABASE_URL = os.environ.get('SUPABASE_URL', '').rstrip('/')
 SUPABASE_ANON_KEY = os.environ.get('SUPABASE_ANON_KEY', '')
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY', '')
 
+import psycopg2
+
+
+def _db_execute(sql, params):
+    """Thao tác DB trực tiếp — chỉ dùng để dựng dữ liệu test (vd event không chủ)."""
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute(sql, params)
+    cur.close()
+    conn.close()
+
 
 def create_test_user():
     """Tạo user test qua Admin API (service_role — CHỈ dùng trong test) và
@@ -67,7 +79,7 @@ def test_banks_api():
         return False
 
 def test_create_event(token):
-    """Test tạo sự kiện mới"""
+    """Test tạo sự kiện mới — response KHÔNG được chứa edit_key (đã bỏ cơ chế key)"""
     print("Testing create event API...")
     event_data = {
         "title": "Test Event",
@@ -86,7 +98,7 @@ def test_create_event(token):
             "Chị B": {"bank": "MB", "account": "0987654321"}
         }
     }
-    
+
     response = requests.post(
         f"{BASE_URL}/api/events",
         json=event_data,
@@ -96,26 +108,23 @@ def test_create_event(token):
     if response.status_code == 200:
         data = response.json()
         if data.get('success'):
+            if 'edit_key' in data:
+                print("❌ Create event vẫn trả edit_key — cơ chế key phải bị bỏ")
+                return None
             event_code = data.get('event_code')
-            edit_key = data.get('edit_key')
-            if not edit_key:
-                print("❌ Create event failed - missing edit_key in response")
-                return None, None
             print(f"✅ Create event OK - Event code: {event_code}")
-            return event_code, edit_key
-        else:
-            print(f"❌ Create event failed - {data.get('error')}")
-            return None, None
-    else:
-        print(f"❌ Create event failed - Status: {response.status_code}")
-        return None, None
+            return event_code
+        print(f"❌ Create event failed - {data.get('error')}")
+        return None
+    print(f"❌ Create event failed - Status: {response.status_code}")
+    return None
 
-def test_get_event(event_code, edit_key, token):
-    """Test lấy thông tin sự kiện + cờ can_edit"""
+def test_get_event(event_code, token):
+    """Test lấy thông tin sự kiện + cờ can_edit (header X-Edit-Key phải bị bỏ qua)"""
     print(f"Testing get event API for {event_code}...")
 
-    # Không key / sai key -> can_edit phải là False
-    for headers, label in (({}, 'không key'), ({'X-Edit-Key': 'sai-key'}, 'sai key')):
+    # Người lạ (kể cả gửi kèm header key cũ) → can_edit=False, không lộ edit_key
+    for headers, label in (({}, 'ẩn danh'), ({'X-Edit-Key': 'key-cu-nao-do'}, 'kèm header key cũ')):
         response = requests.get(f"{BASE_URL}/api/events/{event_code}", headers=headers)
         if response.status_code != 200:
             print(f"❌ Get event failed - Status: {response.status_code}")
@@ -127,34 +136,27 @@ def test_get_event(event_code, edit_key, token):
         if event.get('can_edit') is not False:
             print(f"❌ can_edit phải là False khi {label}, nhận: {event.get('can_edit')}")
             return False
-    print("✅ can_edit=False khi không có/sai key")
+        if event.get('login_required_to_edit') is not False:
+            print(f"❌ login_required_to_edit phải False với người lạ ({label})")
+            return False
+    print("✅ Người lạ: can_edit=False, header X-Edit-Key bị bỏ qua")
 
-    # Key đúng nhưng CHƯA đăng nhập → can_edit=False + cờ mời đăng nhập
-    response = requests.get(f"{BASE_URL}/api/events/{event_code}", headers={'X-Edit-Key': edit_key})
-    event = response.json().get('event') or {}
-    if event.get('can_edit') is not False or event.get('login_required_to_edit') is not True:
-        print(f"❌ key đúng không JWT phải can_edit=False + login_required_to_edit=True, nhận: {event.get('can_edit')}/{event.get('login_required_to_edit')}")
-        return False
-    print("✅ key đúng chưa đăng nhập → can_edit=False, login_required_to_edit=True")
-
-    # Key đúng + đã đăng nhập → can_edit=True
+    # Owner đăng nhập → can_edit=True
     response = requests.get(f"{BASE_URL}/api/events/{event_code}",
-                            headers={'X-Edit-Key': edit_key, 'Authorization': f'Bearer {token}'})
+                            headers={'Authorization': f'Bearer {token}'})
     if response.status_code == 200:
         data = response.json()
         if data.get('success'):
             event = data.get('event')
             if event.get('can_edit') is not True:
-                print(f"❌ can_edit phải là True với key đúng + JWT, nhận: {event.get('can_edit')}")
+                print(f"❌ can_edit phải là True với owner JWT, nhận: {event.get('can_edit')}")
                 return False
-            print(f"✅ Get event OK - Title: {event.get('title')} (can_edit=True với key đúng + JWT)")
+            print(f"✅ Get event OK - Title: {event.get('title')} (can_edit=True với owner)")
             return True
-        else:
-            print(f"❌ Get event failed - {data.get('error')}")
-            return False
-    else:
-        print(f"❌ Get event failed - Status: {response.status_code}")
+        print(f"❌ Get event failed - {data.get('error')}")
         return False
+    print(f"❌ Get event failed - Status: {response.status_code}")
+    return False
 
 def test_lookup_events(event_code):
     """Test API batch lookup cho danh sách 'Sự Kiện Của Tôi'"""
@@ -186,19 +188,16 @@ def test_lookup_events(event_code):
     print("✅ Lookup events OK (batch + validate + không lộ dữ liệu nhạy cảm)")
     return True
 
-def test_update_event(event_code, edit_key, token):
-    """Test cập nhật sự kiện"""
+def test_update_event(event_code, token):
+    """Test cập nhật sự kiện — quyền theo owner JWT, user khác bị 403"""
     print(f"Testing update event API for {event_code}...")
-    # "Có token + sai key" chỉ thật sự chạm nhánh 403 nếu token KHÔNG phải
-    # owner — JWT của owner được toàn quyền bất kể edit_key (_check_edit_permission
-    # khớp owner_id trước, không xét key), nên cần user thứ hai ở đây.
     user2_id, token2, _email2 = create_test_user()
     try:
-        return _test_update_event_body(event_code, edit_key, token, token2)
+        return _test_update_event_body(event_code, token, token2)
     finally:
         delete_test_user(user2_id)
 
-def _test_update_event_body(event_code, edit_key, token, token2):
+def _test_update_event_body(event_code, token, token2):
     event_data = {
         "title": "Updated Test Event",
         "members": ["Anh A", "Chị B", "Em C", "Anh D"],
@@ -218,31 +217,28 @@ def _test_update_event_body(event_code, edit_key, token, token2):
         }
     }
 
-    # Không token, có key đúng → giờ phải 401
-    r = requests.put(f"{BASE_URL}/api/events/{event_code}", json=event_data,
-                     headers={'X-Edit-Key': edit_key})
+    # Không token → 401 (mọi thao tác ghi cần đăng nhập)
+    r = requests.put(f"{BASE_URL}/api/events/{event_code}", json=event_data)
     if r.status_code != 401:
         print(f"❌ PUT không đăng nhập phải 401, nhận {r.status_code}")
         return False
-    print("✅ PUT có key nhưng chưa đăng nhập → 401")
+    print("✅ PUT chưa đăng nhập → 401")
 
-    # Có token (không phải owner) + sai key → 403
+    # User khác (không phải owner, không được mời, event mặc định link+viewer) → 403
     response = requests.put(
         f"{BASE_URL}/api/events/{event_code}",
         json=event_data,
-        headers={'Content-Type': 'application/json', 'X-Edit-Key': 'sai-key',
-                 'Authorization': f'Bearer {token2}'}
+        headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {token2}'}
     )
     if response.status_code != 403:
-        print(f"❌ Update without valid edit_key should be 403, got {response.status_code}")
+        print(f"❌ PUT bởi user không có quyền phải 403, nhận {response.status_code}")
         return False
-    print("✅ Update without valid edit_key correctly rejected (403)")
+    print("✅ PUT bởi user không có quyền → 403")
 
     response = requests.put(
         f"{BASE_URL}/api/events/{event_code}",
         json=event_data,
-        headers={'Content-Type': 'application/json', 'X-Edit-Key': edit_key,
-                 'Authorization': f'Bearer {token}'}
+        headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {token}'}
     )
 
     if response.status_code != 200 or not response.json().get('success'):
@@ -251,7 +247,7 @@ def _test_update_event_body(event_code, edit_key, token, token2):
     if not response.json().get('updated_at'):
         print("❌ Update response thiếu updated_at")
         return False
-    print(f"✅ Update event OK")
+    print("✅ Update event OK")
 
     # Optimistic locking: expectedUpdatedAt cũ phải bị từ chối 409
     stale = dict(event_data)
@@ -259,22 +255,19 @@ def _test_update_event_body(event_code, edit_key, token, token2):
     r = requests.put(
         f"{BASE_URL}/api/events/{event_code}",
         json=stale,
-        headers={'Content-Type': 'application/json', 'X-Edit-Key': edit_key,
-                 'Authorization': f'Bearer {token}'}
+        headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {token}'}
     )
     if r.status_code != 409:
         print(f"❌ PUT với expectedUpdatedAt cũ phải trả 409, nhận {r.status_code}")
         return False
     print("✅ Optimistic locking: 409 khi expectedUpdatedAt đã cũ")
 
-    # expectedUpdatedAt đúng (vừa nhận từ lần update trước) phải được chấp nhận
     fresh = dict(event_data)
     fresh['expectedUpdatedAt'] = response.json()['updated_at']
     r = requests.put(
         f"{BASE_URL}/api/events/{event_code}",
         json=fresh,
-        headers={'Content-Type': 'application/json', 'X-Edit-Key': edit_key,
-                 'Authorization': f'Bearer {token}'}
+        headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {token}'}
     )
     if r.status_code != 200:
         print(f"❌ PUT với expectedUpdatedAt hiện tại phải 200, nhận {r.status_code}")
@@ -282,8 +275,8 @@ def _test_update_event_body(event_code, edit_key, token, token2):
     print("✅ Optimistic locking: 200 khi expectedUpdatedAt khớp")
     return True
 
-def test_delete_event(event_code, edit_key, token):
-    """Test xóa sự kiện"""
+def test_delete_event(event_code, token):
+    """Test xóa sự kiện — chỉ owner (không còn edit key)"""
     print(f"Testing delete event API for {event_code}...")
 
     response = requests.delete(f"{BASE_URL}/api/events/{event_code}")
@@ -294,22 +287,16 @@ def test_delete_event(event_code, edit_key, token):
 
     response = requests.delete(
         f"{BASE_URL}/api/events/{event_code}",
-        headers={'X-Edit-Key': edit_key, 'Authorization': f'Bearer {token}'}
+        headers={'Authorization': f'Bearer {token}'}
     )
 
-    if response.status_code == 200:
-        data = response.json()
-        if data.get('success'):
-            print(f"✅ Delete event OK")
-            return True
-        else:
-            print(f"❌ Delete event failed - {data.get('error')}")
-            return False
-    else:
-        print(f"❌ Delete event failed - Status: {response.status_code}")
-        return False
+    if response.status_code == 200 and response.json().get('success'):
+        print("✅ Delete event OK")
+        return True
+    print(f"❌ Delete event failed - Status: {response.status_code}")
+    return False
 
-def test_roundtrip_document(event_code, edit_key, token):
+def test_roundtrip_document(event_code, token):
     """PUT document đầy đủ (đa tiền tệ, couples, rates) rồi GET so từng trường —
     bất biến quan trọng nhất của schema quan hệ: không mất/không méo dữ liệu."""
     print("Testing document round-trip...")
@@ -336,7 +323,7 @@ def test_roundtrip_document(event_code, edit_key, token):
     doc_put = dict(doc)
     doc_put["expectedUpdatedAt"] = r.json()["event"]["updated_at"]
     r = requests.put(f"{BASE_URL}/api/events/{event_code}", json=doc_put,
-                     headers={'X-Edit-Key': edit_key, 'Authorization': f'Bearer {token}'})
+                     headers={'Authorization': f'Bearer {token}'})
     if r.status_code != 200:
         print(f"❌ Round-trip PUT failed - Status: {r.status_code} {r.text}")
         return False
@@ -350,7 +337,7 @@ def test_roundtrip_document(event_code, edit_key, token):
     return True
 
 def test_auth_matrix(token):
-    """Ma trận quyền tạo/sửa: 401 vs 403, owner JWT vs edit_key."""
+    """Ma trận quyền: 401 vs 403, owner JWT vs chế độ chia sẻ (không còn edit key)."""
     print("Testing auth matrix...")
     user2_id, token2, _email2 = create_test_user()
     try:
@@ -364,14 +351,14 @@ def test_auth_matrix(token):
         assert r.status_code == 401, f'POST token rác phải 401, được {r.status_code}'
         print("  ✅ POST không/sai token → 401")
 
-        # 2. POST có token → tạo được
+        # 2. POST có token → tạo được, KHÔNG trả edit_key
         r = requests.post(f"{BASE_URL}/api/events", json=payload,
                           headers={'Authorization': f'Bearer {token}'})
-        assert r.status_code == 200 and r.json().get('edit_key'), r.text
+        assert r.status_code == 200 and r.json().get('success'), r.text
+        assert 'edit_key' not in r.json(), 'POST không được trả edit_key nữa'
         code = r.json()['event_code']
-        edit_key = r.json()['edit_key']
         updated_at = r.json()['updated_at']
-        print(f"  ✅ POST có token → tạo được ({code})")
+        print(f"  ✅ POST có token → tạo được, không có edit_key ({code})")
 
         # 3. GET công khai: không lộ edit_key, can_edit=false; owner JWT: can_edit=true
         r = requests.get(f"{BASE_URL}/api/events/{code}")
@@ -383,33 +370,38 @@ def test_auth_matrix(token):
         assert r.json()['event']['can_edit'] is True, 'owner phải có can_edit'
         print("  ✅ GET: không lộ edit_key; can_edit đúng theo vai")
 
-        # 4. PUT bằng owner JWT, KHÔNG có edit_key → 200
+        # 4. PUT bằng owner JWT → 200
         put_doc = dict(payload)
         put_doc['expectedUpdatedAt'] = updated_at
         r = requests.put(f"{BASE_URL}/api/events/{code}", json=put_doc,
                          headers={'Authorization': f'Bearer {token}'})
-        assert r.status_code == 200, f'owner PUT không cần key phải 200, được {r.status_code}'
+        assert r.status_code == 200, f'owner PUT phải 200, được {r.status_code}'
         updated_at = r.json()['updated_at']
-        print("  ✅ PUT bằng owner JWT (không edit_key) → 200")
+        print("  ✅ PUT bằng owner JWT → 200")
 
-        # 5a. PUT bằng edit_key, KHÔNG token → 401 (mọi thao tác ghi cần đăng nhập)
+        # 5. PUT bằng user khác (mặc định link+viewer) → 403; kèm header key cũ
+        #    cũng vẫn 403 — header X-Edit-Key phải hoàn toàn bị bỏ qua
         put_doc['expectedUpdatedAt'] = updated_at
         r = requests.put(f"{BASE_URL}/api/events/{code}", json=put_doc,
-                         headers={'X-Edit-Key': edit_key})
-        assert r.status_code == 401, f'PUT edit_key không token phải 401, được {r.status_code}'
-        # 5b. PUT bằng edit_key + JWT user KHÁC (không phải owner) → 200
+                         headers={'Authorization': f'Bearer {token2}'})
+        assert r.status_code == 403, f'PUT user khác phải 403, được {r.status_code}'
         r = requests.put(f"{BASE_URL}/api/events/{code}", json=put_doc,
-                         headers={'X-Edit-Key': edit_key, 'Authorization': f'Bearer {token2}'})
-        assert r.status_code == 200, f'PUT edit_key + JWT phải 200, được {r.status_code}'
-        updated_at = r.json()['updated_at']
-        print("  ✅ PUT edit_key: không token → 401; kèm JWT user khác → 200")
+                         headers={'X-Edit-Key': 'key-bat-ky', 'Authorization': f'Bearer {token2}'})
+        assert r.status_code == 403, f'PUT kèm X-Edit-Key phải vẫn 403, được {r.status_code}'
+        print("  ✅ PUT user khác → 403 (header X-Edit-Key bị bỏ qua)")
 
-        # 6. PUT sai cả hai → 403
-        put_doc['expectedUpdatedAt'] = updated_at
+        # 6. Owner bật "ai có link đều chỉnh sửa" → user khác PUT được, nhưng KHÔNG xóa được
+        r = requests.put(f"{BASE_URL}/api/events/{code}/sharing",
+                         json={'access': 'link', 'role': 'editor'},
+                         headers={'Authorization': f'Bearer {token}'})
+        assert r.status_code == 200, f'owner đổi sharing phải 200, được {r.status_code}'
         r = requests.put(f"{BASE_URL}/api/events/{code}", json=put_doc,
-                         headers={'X-Edit-Key': 'sai-key', 'Authorization': f'Bearer {token2}'})
-        assert r.status_code == 403, f'PUT sai key phải 403, được {r.status_code}'
-        print("  ✅ PUT sai key, không token → 403")
+                         headers={'Authorization': f'Bearer {token2}'})
+        assert r.status_code == 200, f'link-editor PUT phải 200, được {r.status_code}'
+        r = requests.delete(f"{BASE_URL}/api/events/{code}",
+                            headers={'Authorization': f'Bearer {token2}'})
+        assert r.status_code == 403, f'link-editor DELETE phải 403, được {r.status_code}'
+        print("  ✅ link-editor: PUT 200, DELETE 403")
 
         # 7. my-events: có event vừa tạo; không token → 401
         r = requests.get(f"{BASE_URL}/api/my-events",
@@ -420,13 +412,59 @@ def test_auth_matrix(token):
         assert r.status_code == 401
         print("  ✅ /api/my-events đúng theo vai")
 
-        # 8. Dọn: owner xóa không cần key
+        # 8. Dọn: owner xóa được
         r = requests.delete(f"{BASE_URL}/api/events/{code}",
                             headers={'Authorization': f'Bearer {token}'})
         assert r.status_code == 200, f'owner DELETE phải 200, được {r.status_code}'
         print("✅ Auth matrix OK")
         return True
     finally:
+        delete_test_user(user2_id)
+
+def test_ownerless_event(token):
+    """Event không chủ (legacy/migrate): ai đăng nhập cũng sửa/xóa được;
+    ẩn danh xem được + được mời đăng nhập; không đặt được chế độ hạn chế."""
+    print("Testing ownerless (legacy) event...")
+    user2_id, token2, _email2 = create_test_user()
+    payload = {"title": "Event không chủ", "members": ["An"], "expenses": []}
+    r = requests.post(f"{BASE_URL}/api/events", json=payload,
+                      headers={'Authorization': f'Bearer {token}'})
+    assert r.status_code == 200, r.text
+    code = r.json()['event_code']
+    try:
+        # Mô phỏng event legacy: gỡ owner trực tiếp trong DB
+        _db_execute('UPDATE events SET owner_id = NULL WHERE event_code = %s', (code,))
+
+        # Ẩn danh: xem được, có quyền nhưng thiếu đăng nhập → login_required_to_edit
+        r = requests.get(f"{BASE_URL}/api/events/{code}")
+        ev = r.json()['event']
+        assert r.status_code == 200 and ev['can_edit'] is False, 'ẩn danh không có can_edit'
+        assert ev['login_required_to_edit'] is True, 'event không chủ phải mời đăng nhập để sửa'
+
+        # User bất kỳ đã đăng nhập: sửa được
+        put_doc = dict(payload, title='Đã sửa bởi user khác')
+        put_doc['expectedUpdatedAt'] = ev['updated_at']
+        r = requests.put(f"{BASE_URL}/api/events/{code}", json=put_doc,
+                         headers={'Authorization': f'Bearer {token2}'})
+        assert r.status_code == 200, f'PUT event không chủ phải 200, được {r.status_code}: {r.text}'
+
+        # Không đặt được 'restricted' cho event không chủ (sẽ không ai xem được)
+        r = requests.put(f"{BASE_URL}/api/events/{code}/sharing",
+                         json={'access': 'restricted', 'role': 'viewer'},
+                         headers={'Authorization': f'Bearer {token2}'})
+        assert r.status_code == 400, f'restricted cho event không chủ phải 400, được {r.status_code}'
+
+        # User bất kỳ đã đăng nhập: xóa được
+        r = requests.delete(f"{BASE_URL}/api/events/{code}",
+                            headers={'Authorization': f'Bearer {token2}'})
+        assert r.status_code == 200, f'DELETE event không chủ phải 200, được {r.status_code}'
+        code = None
+        print("✅ Event không chủ: sửa/xóa được khi đăng nhập, chặn restricted")
+        return True
+    finally:
+        if code:
+            requests.delete(f"{BASE_URL}/api/events/{code}",
+                            headers={'Authorization': f'Bearer {token}'})
         delete_test_user(user2_id)
 
 def test_revisions_and_restore(token):
@@ -642,24 +680,26 @@ def main():
 
     user_id, token, owner_email = create_test_user()
     try:
-        event_code, edit_key = test_create_event(token)
+        event_code = test_create_event(token)
         if not event_code:
             return
-        if not test_get_event(event_code, edit_key, token):
+        if not test_get_event(event_code, token):
             return
         if not test_lookup_events(event_code):
             return
-        if not test_update_event(event_code, edit_key, token):
+        if not test_update_event(event_code, token):
             return
-        if not test_roundtrip_document(event_code, edit_key, token):
+        if not test_roundtrip_document(event_code, token):
             return
         if not test_auth_matrix(token):
+            return
+        if not test_ownerless_event(token):
             return
         if not test_revisions_and_restore(token):
             return
         if not test_collaborators(token, owner_email):
             return
-        if not test_delete_event(event_code, edit_key, token):
+        if not test_delete_event(event_code, token):
             return
         print("\n🎉 All tests passed!")
     finally:
