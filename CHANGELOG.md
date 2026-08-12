@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.0] - 2026-08-12
+
+### Thêm mới
+- ✅ Lịch sử chỉnh sửa: mỗi lần thêm/sửa/xóa ghi lại ai làm, lúc nào, thay đổi gì (diff tiếng Việt)
+- ✅ Khôi phục sự kiện về phiên bản bất kỳ trong lịch sử (kiểu Google Docs)
+- ✅ API `GET /api/events/<event_code>/revisions` và `POST /api/events/<event_code>/restore`
+
+### Thay đổi
+- 🔄 Mọi thao tác chỉnh sửa (lưu/xóa/đổi chia sẻ/khôi phục) yêu cầu đăng nhập — quyền qua edit_key/link chia sẻ giữ nguyên, đăng nhập để gắn danh tính vào lịch sử
+
 ## [1.0.0] - 2025-08-01
 
 ### Thêm mới
