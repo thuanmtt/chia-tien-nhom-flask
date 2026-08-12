@@ -184,6 +184,59 @@ _SHARE_LABEL = {
 }
 
 
+# Người được mời đích danh — chỉ owner quản lý danh sách
+_MAX_COLLABORATORS = 50
+_COLLAB_ROLE_LABEL = {'viewer': 'người xem', 'editor': 'người chỉnh sửa'}
+
+
+def _require_owner(cursor, event_code, claims):
+    """Chỉ owner quản lý danh sách người có quyền truy cập.
+
+    Trả (status, event_id, owner_id) với status 'not_found' | 'forbidden' | 'ok'.
+    Event legacy (owner_id NULL) → 'forbidden' (không có owner để quản lý)."""
+    cursor.execute('SELECT id, owner_id FROM events WHERE event_code = %s', (event_code,))
+    row = cursor.fetchone()
+    if row is None:
+        return 'not_found', None, None
+    event_id, owner_id = row
+    user_id = (claims or {}).get('sub')
+    if not (owner_id and user_id and str(owner_id) == user_id):
+        return 'forbidden', event_id, owner_id
+    return 'ok', event_id, owner_id
+
+
+def _resolve_identifier(cursor, identifier):
+    """Email (chứa '@') hoặc username → (user_id str, email) từ Supabase Auth.
+
+    (None, None) nếu không có tài khoản. Cần schema auth của Supabase —
+    precedent: /api/auth/login đã JOIN auth.users."""
+    if '@' in identifier:
+        cursor.execute('SELECT id, email FROM auth.users WHERE lower(email) = lower(%s)',
+                       (identifier,))
+    else:
+        cursor.execute(
+            '''SELECT p.user_id, u.email FROM user_profiles p
+               JOIN auth.users u ON u.id = p.user_id
+               WHERE p.username = %s''',
+            (identifier.lower(),),
+        )
+    row = cursor.fetchone()
+    return (str(row[0]), row[1]) if row else (None, None)
+
+
+def _collaborator_display(cursor, user_id, email=None):
+    """Tên hiển thị của một user: username nếu có, không thì email."""
+    cursor.execute('SELECT username FROM user_profiles WHERE user_id = %s::uuid', (user_id,))
+    row = cursor.fetchone()
+    if row and row[0]:
+        return row[0]
+    if email is None:
+        cursor.execute('SELECT email FROM auth.users WHERE id = %s::uuid', (user_id,))
+        row = cursor.fetchone()
+        email = row[0] if row else None
+    return email or ''
+
+
 def _database_url():
     url = (
         os.environ.get('DATABASE_URL')
@@ -980,6 +1033,200 @@ def restore_event(event_code):
             cursor.close()
         new_updated_at = new_row[0].isoformat() if new_row and new_row[0] else None
         return jsonify({'success': True, 'updated_at': new_updated_at})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return _server_error(e)
+
+
+@app.route('/api/events/<event_code>/collaborators')
+@limiter.limit('60 per minute')
+def list_collaborators(event_code):
+    """Danh sách người được mời — chỉ owner xem được."""
+    try:
+        claims = request_user_claims(request)
+        if not (claims or {}).get('sub'):
+            return jsonify({'success': False, 'error': 'Vui lòng đăng nhập.'}), 401
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        status, event_id, _owner_id = _require_owner(cursor, event_code, claims)
+        if status == 'not_found':
+            cursor.close()
+            return jsonify({'success': False, 'error': 'Event not found'}), 404
+        if status == 'forbidden':
+            cursor.close()
+            return jsonify({'success': False,
+                            'error': 'Chỉ chủ sở hữu mới quản lý được người có quyền truy cập.'}), 403
+
+        cursor.execute(
+            '''SELECT c.user_id, c.role, p.username, u.email
+               FROM event_collaborators c
+               LEFT JOIN user_profiles p ON p.user_id = c.user_id
+               LEFT JOIN auth.users u ON u.id = c.user_id
+               WHERE c.event_id = %s ORDER BY c.created_at''',
+            (event_id,),
+        )
+        collaborators = [
+            {'user_id': str(r[0]), 'display': r[2] or r[3] or '', 'role': r[1]}
+            for r in cursor.fetchall()
+        ]
+        cursor.close()
+        return jsonify({'success': True, 'collaborators': collaborators})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return _server_error(e)
+
+
+@app.route('/api/events/<event_code>/collaborators', methods=['POST'])
+@limiter.limit('20 per minute; 200 per day')
+def add_collaborator(event_code):
+    """Thêm người theo email/username, hoặc đổi vai trò người đã có (upsert) — chỉ owner.
+
+    Lưu ý riêng tư: response tiết lộ email/username có tài khoản hay không —
+    chấp nhận (cần đăng nhập + là owner + rate limit; Google Docs tương tự)."""
+    try:
+        claims = request_user_claims(request)
+        if not (claims or {}).get('sub'):
+            return jsonify({'success': False, 'error': 'Vui lòng đăng nhập.'}), 401
+
+        body = request.get_json(silent=True) or {}
+        identifier = body.get('identifier')
+        role = body.get('role')
+        if (not isinstance(identifier, str) or not identifier.strip()
+                or len(identifier) > 254 or role not in ('viewer', 'editor')):
+            return jsonify({'success': False, 'error': 'Dữ liệu không hợp lệ.'}), 400
+        identifier = identifier.strip()
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        status, event_id, owner_id = _require_owner(cursor, event_code, claims)
+        if status == 'not_found':
+            cursor.close()
+            return jsonify({'success': False, 'error': 'Event not found'}), 404
+        if status == 'forbidden':
+            cursor.close()
+            return jsonify({'success': False,
+                            'error': 'Chỉ chủ sở hữu mới quản lý được người có quyền truy cập.'}), 403
+
+        target_id, target_email = _resolve_identifier(cursor, identifier)
+        if not target_id:
+            cursor.close()
+            return jsonify({'success': False,
+                            'error': 'Không tìm thấy tài khoản với email/username này.'}), 404
+        if str(owner_id) == target_id:
+            cursor.close()
+            return jsonify({'success': False, 'error': 'Chủ sở hữu đã có toàn quyền.'}), 400
+
+        cursor.execute(
+            'SELECT role FROM event_collaborators WHERE event_id = %s AND user_id = %s::uuid',
+            (event_id, target_id),
+        )
+        existing = cursor.fetchone()
+        display = _collaborator_display(cursor, target_id, target_email)
+
+        if existing and existing[0] == role:
+            # No-op: đã có đúng vai trò này — không ghi lịch sử
+            cursor.close()
+            return jsonify({'success': True,
+                            'collaborator': {'user_id': target_id, 'display': display, 'role': role}})
+
+        if not existing:
+            cursor.execute('SELECT count(*) FROM event_collaborators WHERE event_id = %s', (event_id,))
+            if cursor.fetchone()[0] >= _MAX_COLLABORATORS:
+                cursor.close()
+                return jsonify({'success': False,
+                                'error': f'Tối đa {_MAX_COLLABORATORS} người mỗi sự kiện.'}), 400
+
+        role_label = _COLLAB_ROLE_LABEL[role]
+        text = (f"Đổi vai trò của '{display}' thành {role_label}" if existing
+                else f"Thêm quyền truy cập cho '{display}' ({role_label})")
+        try:
+            cursor.execute('BEGIN')
+            cursor.execute(
+                '''INSERT INTO event_collaborators (event_id, user_id, role, added_by)
+                   VALUES (%s, %s::uuid, %s, %s::uuid)
+                   ON CONFLICT (event_id, user_id) DO UPDATE SET role = EXCLUDED.role''',
+                (event_id, target_id, role, claims['sub']),
+            )
+            # Không bump updated_at (như /sharing); ghi lịch sử trong cùng transaction
+            snapshot = _load_full_document(conn, cursor, event_id)
+            actor_id, actor_name = _actor_info(cursor, claims)
+            record_revision(cursor, event_id, actor_id, actor_name, 'share',
+                            [{'a': 'update', 'o': f'collab:{target_id}', 't': text}], snapshot)
+            cursor.execute('COMMIT')
+        except Exception:
+            try:
+                cursor.execute('ROLLBACK')
+            except Exception:
+                # ROLLBACK có thể fail nếu connection đã chết — không che lỗi gốc
+                pass
+            raise
+        finally:
+            cursor.close()
+        return jsonify({'success': True,
+                        'collaborator': {'user_id': target_id, 'display': display, 'role': role}})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return _server_error(e)
+
+
+@app.route('/api/events/<event_code>/collaborators/<user_id>', methods=['DELETE'])
+@limiter.limit('20 per minute; 200 per day')
+def remove_collaborator(event_code, user_id):
+    """Gỡ một người khỏi danh sách — chỉ owner."""
+    try:
+        claims = request_user_claims(request)
+        if not (claims or {}).get('sub'):
+            return jsonify({'success': False, 'error': 'Vui lòng đăng nhập.'}), 401
+        try:
+            uuid.UUID(str(user_id))
+        except (ValueError, TypeError):
+            return jsonify({'success': False,
+                            'error': 'Không tìm thấy người này trong danh sách.'}), 404
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        status, event_id, _owner_id = _require_owner(cursor, event_code, claims)
+        if status == 'not_found':
+            cursor.close()
+            return jsonify({'success': False, 'error': 'Event not found'}), 404
+        if status == 'forbidden':
+            cursor.close()
+            return jsonify({'success': False,
+                            'error': 'Chỉ chủ sở hữu mới quản lý được người có quyền truy cập.'}), 403
+
+        display = _collaborator_display(cursor, user_id)
+        try:
+            cursor.execute('BEGIN')
+            cursor.execute(
+                '''DELETE FROM event_collaborators
+                   WHERE event_id = %s AND user_id = %s::uuid RETURNING role''',
+                (event_id, user_id),
+            )
+            if cursor.fetchone() is None:
+                cursor.execute('ROLLBACK')
+                cursor.close()
+                return jsonify({'success': False,
+                                'error': 'Không tìm thấy người này trong danh sách.'}), 404
+            snapshot = _load_full_document(conn, cursor, event_id)
+            actor_id, actor_name = _actor_info(cursor, claims)
+            record_revision(cursor, event_id, actor_id, actor_name, 'share',
+                            [{'a': 'remove', 'o': f'collab:{user_id}',
+                              't': f"Xóa quyền truy cập của '{display}'"}], snapshot)
+            cursor.execute('COMMIT')
+        except Exception:
+            try:
+                cursor.execute('ROLLBACK')
+            except Exception:
+                # ROLLBACK có thể fail nếu connection đã chết — không che lỗi gốc
+                pass
+            raise
+        finally:
+            cursor.close()
+        return jsonify({'success': True})
     except HTTPException:
         raise
     except Exception as e:
