@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.0] - 2026-08-12
+
+### Thêm mới
+- ✅ Thêm người có quyền truy cập qua email/username (kiểu Google Docs): vai trò Người xem / Người chỉnh sửa riêng từng người, chỉ chủ sở hữu quản lý
+- ✅ Người được mời truy cập được sự kiện ở chế độ Hạn chế; thao tác thêm/đổi vai trò/gỡ đều ghi vào lịch sử chỉnh sửa
+
+### Sửa lỗi
+- 🐛 Sự kiện Hạn chế không còn biến mất khỏi "Sự Kiện Của Tôi" của người được mời
+
 ## [1.1.0] - 2026-08-12
 
 ### Thêm mới

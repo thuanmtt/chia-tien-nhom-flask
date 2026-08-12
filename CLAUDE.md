@@ -52,6 +52,8 @@ khử trùng lặp tên vì validation không dedupe). Concurrency: optimistic l
 (`expectedUpdatedAt` → 409). Kết nối qua Supabase pooler transaction mode (port 6543).
 Bảng nào cũng bật RLS không policy — chặn PostgREST công khai; Flask (role postgres,
 owner bảng) không bị ảnh hưởng. `migrate_to_supabase.py` chuyển dữ liệu từ DB cũ.
+Bảng `event_collaborators` (event_id, user_id, role viewer/editor): người được mời
+đích danh — quyền CỘNG DỒN với quyền chung theo link/edit_key.
 
 Lịch sử chỉnh sửa: bảng `event_revisions` (actor, kind create/edit/restore/share, summary
 diff tiếng Việt từ `revision_diff.py`, snapshot JSONB cả document SAU hành động) — ghi trong
@@ -71,8 +73,15 @@ lịch sử; `POST /api/events/<code>/restore` khôi phục snapshot (validate l
      (401 = chưa đăng nhập, 403 = không có quyền). edit_key/link-editor vẫn quyết định QUYỀN,
      JWT chỉ để gắn danh tính. GET không cần đăng nhập; `can_edit` = có quyền VÀ đã đăng nhập,
      kèm cờ `login_required_to_edit` khi có quyền mà chưa đăng nhập (UI hiện banner mời đăng nhập).
+- **Người được mời đích danh** (`event_collaborators`, thêm qua email/username — resolve
+     server-side qua `auth.users`/`user_profiles`): `viewer` xem được event Hạn chế; `editor`
+     sửa nội dung + đổi /sharing nhưng KHÔNG xóa event. CHỈ owner quản lý danh sách
+     (3 endpoint `/api/events/<code>/collaborators`, tối đa 50 người). GET event trả thêm
+     `is_owner` — frontend chỉ hiện UI quản lý người cho owner. Thêm/đổi/gỡ đều ghi
+     revision kind 'share'.
 
-**Share links & quyền truy cập (kiểu Google Docs)** — link chia sẻ duy nhất `/?event_code=X` (không kèm key); quyền do 2 cột trên `events` quyết: `share_access` (`'restricted'` | `'link'`) + `share_role` (`'viewer'` | `'editor'`), mặc định `link`+`viewer`. `restricted`: GET trả 403 cho người không phải owner/không có edit_key, lookup cũng ẩn (trừ owner). `link`+`editor`: ai có link đều PUT được không cần key (nhưng KHÔNG xóa được — DELETE gọi `_check_edit_permission(..., allow_link_editor=False)`). Đổi cài đặt qua `PUT /api/events/<code>/sharing` (ai có quyền sửa đều đổi được, không bump `updated_at`). Link cũ `/?event_code=X&key=<edit_key>` vẫn được tôn trọng (edit_key giữ nguyên vai trò). `/share/<code>` and `/event/<code>` are legacy routes that redirect to `/?event_code=X` (the JS also keeps a `/share/` path branch for the offline/service-worker fallback case). `index.html` contains no Jinja expressions; all routing state is parsed from the URL in JS.
+**Share links & quyền truy cập (kiểu Google Docs)** — link chia sẻ duy nhất `/?event_code=X` (không kèm key); quyền do 2 cột trên `events` quyết: `share_access` (`'restricted'` | `'link'`) + `share_role` (`'viewer'` | `'editor'`), mặc định `link`+`viewer`. `restricted`: GET trả 403 trừ owner/người có edit_key/người được mời đích danh
+(event_collaborators); lookup cũng ẩn trừ owner và người được mời. `link`+`editor`: ai có link đều PUT được không cần key (nhưng KHÔNG xóa được — DELETE gọi `_check_edit_permission(..., allow_link_editor=False)`). Đổi cài đặt qua `PUT /api/events/<code>/sharing` (ai có quyền sửa đều đổi được, không bump `updated_at`). Link cũ `/?event_code=X&key=<edit_key>` vẫn được tôn trọng (edit_key giữ nguyên vai trò). `/share/<code>` and `/event/<code>` are legacy routes that redirect to `/?event_code=X` (the JS also keeps a `/share/` path branch for the offline/service-worker fallback case). `index.html` contains no Jinja expressions; all routing state is parsed from the URL in JS.
 
 **Frontend** — SPA in three files: `templates/index.html` (markup only, no Jinja), `static/app.css`, and `static/app.js` (~2.8k lines; jQuery + Bootstrap from CDN). `static/auth.js` (`window.AppAuth`) wraps Supabase Auth (email/password + Google) and must be loaded before `app.js`; `app.js`'s boot code runs inside `AppAuth.onReady(...)` so it waits for the initial session check. `static/split.js` holds the pure split-money logic (`SplitLogic`, UMD — used by `app.js` in the browser and by `test_split.js` in Node); `app.js` only binds it to page state and renders. Key state lives in localStorage: `currentEventCode`, `savedEventCodes` (the "Sự Kiện Của Tôi" list, loaded via one batch `POST /api/events/lookup` — codes missing from the response get pruned), `eventEditKeys` (map event_code → edit key), `bankInfo`. `loadEventFromServer` sends the stored key, sets `allowEdit` from `can_edit`, deletes invalid keys, and flips the UI to view-only; a 403 on save does the same. Confirmation dialogs go through `showConfirm()` (the shared `#confirmModal`, which must stay LAST among the modals in the DOM so it stacks on top) — don't reintroduce native `confirm()`. `saveEvent` drives the `#saveStatus` header indicator (`setSaveStatus`: saving/saved/error). Modal `#historyModal` (nút "Lịch sử" trên header, chỉ khi allowEdit) hiển thị revisions + nút khôi phục qua showConfirm; `#confirmModal` vẫn phải là modal CUỐI trong DOM.
 
