@@ -1604,7 +1604,7 @@
                 data: JSON.stringify({ codes: batch })
             }))).then(function () {
                 localStorage.removeItem('savedEventCodes');
-            });
+            }).catch(function () { /* giữ nguyên local, lần đăng nhập sau thử lại */ });
         }
 
         // Hàm hiển thị danh sách sự kiện đã lưu.

@@ -383,8 +383,11 @@ def my_events():
                WHERE e.owner_id = %s::uuid
                   OR EXISTS (SELECT 1 FROM event_collaborators c
                              WHERE c.event_id = e.id AND c.user_id = %s::uuid)
-                  OR EXISTS (SELECT 1 FROM saved_events s
-                             WHERE s.event_id = e.id AND s.user_id = %s::uuid)
+                  -- Bookmark không mang quyền: event Hạn chế chỉ hiện qua
+                  -- nhánh owner/được mời ở trên, không qua nhánh saved.
+                  OR (EXISTS (SELECT 1 FROM saved_events s
+                              WHERE s.event_id = e.id AND s.user_id = %s::uuid)
+                      AND (e.share_access <> 'restricted' OR e.owner_id IS NULL))
                ORDER BY e.updated_at DESC''',
             (user_id, user_id, user_id, user_id),
         )

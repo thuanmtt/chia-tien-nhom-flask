@@ -441,6 +441,18 @@ def test_ownerless_event(token):
         assert r.status_code == 200 and ev['can_edit'] is False, 'ẩn danh không có can_edit'
         assert ev['login_required_to_edit'] is True, 'event không chủ phải mời đăng nhập để sửa'
 
+        # Ownerless + restricted: vẫn xem được (carve-out owner_id IS NULL)
+        # và lookup phải thấy (khớp quyền GET, không bị ẩn oan)
+        _db_execute("UPDATE events SET share_access = 'restricted' WHERE event_code = %s", (code,))
+        r = requests.get(f"{BASE_URL}/api/events/{code}")
+        assert r.status_code == 200, \
+            f'ownerless restricted vẫn phải xem được ẩn danh, được {r.status_code}'
+        r = requests.post(f"{BASE_URL}/api/events/lookup", json={'codes': [code]})
+        assert code in [e['event_code'] for e in r.json()['events']], \
+            'lookup phải thấy event ownerless dù đang restricted'
+        _db_execute("UPDATE events SET share_access = 'link' WHERE event_code = %s", (code,))
+        print("  ✅ Ownerless + restricted: vẫn xem được và lookup không ẩn")
+
         # User bất kỳ đã đăng nhập: sửa được
         put_doc = dict(payload, title='Đã sửa bởi user khác')
         put_doc['expectedUpdatedAt'] = ev['updated_at']
@@ -546,6 +558,25 @@ def test_saved_events(token):
         assert requests.delete(f"{BASE_URL}/api/my-events/{code}",
                                headers=auth2).status_code == 200
         print("  ✅ Gỡ khỏi danh sách không đụng event, idempotent")
+
+        # Bookmark không mang quyền: event restricted đã lưu (saved_events)
+        # không được lộ metadata cho người ngoài qua my-events
+        r = requests.post(f"{BASE_URL}/api/my-events/save", json={'codes': [code]}, headers=auth2)
+        assert r.status_code == 200, r.text
+        r = requests.put(f"{BASE_URL}/api/events/{code}/sharing",
+                         json={'access': 'restricted', 'role': 'viewer'}, headers=auth1)
+        assert r.status_code == 200, r.text
+        r = requests.get(f"{BASE_URL}/api/my-events", headers=auth2)
+        assert code not in [e['event_code'] for e in r.json()['events']], \
+            'event restricted đã lưu (bookmark) không được lộ metadata cho người ngoài'
+        r = requests.get(f"{BASE_URL}/api/my-events", headers=auth1)
+        events1 = {e['event_code']: e for e in r.json()['events']}
+        assert code in events1 and events1[code]['owned'] is True, \
+            'owner vẫn phải thấy event của mình dù đang restricted'
+        r = requests.put(f"{BASE_URL}/api/events/{code}/sharing",
+                         json={'access': 'link', 'role': 'viewer'}, headers=auth1)
+        assert r.status_code == 200, r.text
+        print("  ✅ Bookmark event restricted không lộ metadata qua my-events")
 
         # Xóa event → dòng saved_events mất theo (CASCADE): lưu lại rồi xóa event
         requests.post(f"{BASE_URL}/api/my-events/save", json={'codes': [code]}, headers=auth2)
