@@ -60,7 +60,7 @@ actor trong 10 phút; giữ 200 bản/event). `GET /api/events/<code>/revisions`
 lịch sử; `POST /api/events/<code>/restore` khôi phục snapshot (validate lại, log dòng
 'restore', optimistic locking 409). Xóa event vẫn là DELETE cứng — revisions mất theo.
 
-**Auth model** — no user accounts. Two tokens per event:
+**Auth model** — tài khoản Supabase bắt buộc cho MỌI thao tác ghi (xem bullet bên dưới); quyền trên từng event vẫn qua hai token:
 - `event_code` — public identifier, appears in share links.
 - `edit_key` — secret; returned **exactly once** by POST. `GET /api/events/<code>` must NEVER return it. PUT/DELETE require the `X-Edit-Key` header (compared with `hmac.compare_digest`) → 403 otherwise.
 - GET accepts an optional `X-Edit-Key` and returns a `can_edit` flag; the frontend derives edit-vs-view UI entirely from this flag, not from URL shape.

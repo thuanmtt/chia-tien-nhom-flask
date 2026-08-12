@@ -84,7 +84,7 @@ def _provided_edit_key():
     return request.headers.get('X-Edit-Key', '').strip()
 
 
-def _check_edit_permission(cursor, event_code, allow_link_editor=True):
+def _check_edit_permission(cursor, event_code, allow_link_editor=True, adopt_key=True):
     """Kiểm tra quyền sửa/xóa event.
 
     Trả về (status, event_id, updated_at) với status: 'not_found' | 'forbidden' | 'ok'.
@@ -93,6 +93,9 @@ def _check_edit_permission(cursor, event_code, allow_link_editor=True):
     trừ DELETE — allow_link_editor=False) HOẶC X-Edit-Key khớp.
     Event cũ chưa có edit_key: chấp nhận request và "nhận" key client gửi lên
     (nếu có) làm key chính thức, để dữ liệu cũ không bị khóa ngoài ý muốn.
+    adopt_key=False: dùng cho route chỉ-đọc (GET) — vẫn cho qua ('ok') nếu
+    event chưa có edit_key, nhưng KHÔNG ghi key vào DB (tránh GET có side-effect
+    chiếm quyền chỉnh sửa của event legacy chỉ vì client tự sinh key để gửi lên).
     """
     cursor.execute(
         '''SELECT id, edit_key, owner_id, updated_at, share_access, share_role
@@ -119,7 +122,7 @@ def _check_edit_permission(cursor, event_code, allow_link_editor=True):
         if not provided or not hmac.compare_digest(stored, provided):
             return 'forbidden', event_id, updated_at
         return 'ok', event_id, updated_at
-    if provided:
+    if provided and adopt_key:
         cursor.execute('UPDATE events SET edit_key = %s WHERE id = %s', (provided, event_id))
     return 'ok', event_id, updated_at
 
@@ -855,7 +858,7 @@ def list_event_revisions(event_code):
 
         conn = get_db_connection()
         cursor = conn.cursor()
-        permission, event_id, _unused = _check_edit_permission(cursor, event_code)
+        permission, event_id, _unused = _check_edit_permission(cursor, event_code, adopt_key=False)
         cursor.close()
         if permission == 'not_found':
             return jsonify({'success': False, 'error': 'Event not found'}), 404

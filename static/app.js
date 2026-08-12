@@ -2671,9 +2671,14 @@
         function loadHistory() {
             $('#historyLoading').removeClass('d-none');
             $('#historyList').empty();
+            // Chỉ gửi key đã lưu (nếu có) — KHÔNG tự sinh key mới ở đây.
+            // Đây là GET (xem lịch sử), không được phép "nhận" (adopt) edit_key
+            // của event cũ — nếu không, việc chỉ mở modal lịch sử cũng khóa
+            // event legacy vào key tự sinh này.
+            const storedKey = getEditKey(currentEventCode);
             $.ajax({
                 url: `/api/events/${currentEventCode}/revisions`,
-                headers: AppAuth.authHeaders({ 'X-Edit-Key': getOrCreateEditKey(currentEventCode) }),
+                headers: AppAuth.authHeaders(storedKey ? { 'X-Edit-Key': storedKey } : {}),
                 success: function (res) {
                     $('#historyLoading').addClass('d-none');
                     if (res.success) renderHistory(res.revisions || []);
