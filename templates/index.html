@@ -684,7 +684,7 @@
      Phải đứng SAU các modal khác trong DOM để hiện đè lên khi mở lồng nhau. -->
 <!-- Modal tài khoản: username (đăng nhập thay email) + đặt/đổi mật khẩu -->
 <div class="modal fade" id="accountModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title"><i class="fas fa-user-cog me-2"></i>Tài Khoản</h5>
@@ -693,7 +693,9 @@
             <div class="modal-body">
                 <div id="accountMessage" class="small mb-2"></div>
 
-                <form id="accountUsernameForm" class="mb-4">
+                <div class="row g-4">
+                <div class="col-md-6">
+                <form id="accountUsernameForm">
                     <label class="form-label fw-semibold" for="accountUsername">Username</label>
                     <div class="input-group">
                         <input type="text" class="form-control" id="accountUsername"
@@ -703,7 +705,9 @@
                     <div class="form-text">3-30 ký tự a-z, 0-9, dấu chấm, gạch dưới, gạch ngang —
                         dùng thay email khi đăng nhập. Để trống rồi bấm Lưu để xóa.</div>
                 </form>
+                </div>
 
+                <div class="col-md-6">
                 <form id="accountPasswordForm">
                     <label class="form-label fw-semibold">Mật khẩu</label>
                     <p class="form-text mt-0 d-none" id="accountNoPasswordNote">Tài khoản của bạn
@@ -738,6 +742,8 @@
                     </div>
                     <button type="submit" class="btn btn-primary w-100">Lưu mật khẩu</button>
                 </form>
+                </div>
+                </div>
             </div>
         </div>
     </div>
