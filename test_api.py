@@ -5,6 +5,7 @@ Test script cho Flask app
 
 import os
 import secrets
+import sys
 
 import requests
 
@@ -796,44 +797,46 @@ def test_collaborators(token, owner_email):
         requests.delete(f"{BASE_URL}/api/events/{code}", headers=auth)
 
 def main():
-    """Chạy tất cả tests"""
+    """Chạy tất cả tests. Trả True khi TẤT CẢ pass — main exit code khác 0 khi
+    fail để dùng được trong CI / chuỗi &&."""
     print("🚀 Starting API tests...\n")
 
     if not (SUPABASE_URL and SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY):
         print("❌ Cần SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY để test auth.")
-        return
+        return False
 
     if not test_banks_api():
-        return
+        return False
 
     user_id, token, owner_email = create_test_user()
     try:
         event_code = test_create_event(token)
         if not event_code:
-            return
+            return False
         if not test_get_event(event_code, token):
-            return
+            return False
         if not test_lookup_events(event_code):
-            return
+            return False
         if not test_update_event(event_code, token):
-            return
+            return False
         if not test_roundtrip_document(event_code, token):
-            return
+            return False
         if not test_auth_matrix(token):
-            return
+            return False
         if not test_ownerless_event(token):
-            return
+            return False
         if not test_saved_events(token):
-            return
+            return False
         if not test_revisions_and_restore(token):
-            return
+            return False
         if not test_collaborators(token, owner_email):
-            return
+            return False
         if not test_delete_event(event_code, token):
-            return
+            return False
         print("\n🎉 All tests passed!")
+        return True
     finally:
         delete_test_user(user_id)
 
 if __name__ == "__main__":
-    main()
+    sys.exit(0 if main() else 1)

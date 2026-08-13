@@ -1,0 +1,48 @@
+# CI tối thiểu: chạy toàn bộ test KHÔNG cần DB/server + syntax-check frontend
+# + kiểm tra 2 file requirements đồng bộ. test_api.py cần server thật + Supabase
+# secrets nên KHÔNG chạy ở đây — chạy tay trước khi deploy (xem CLAUDE.md).
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Cài dependencies Python
+        run: pip install -r requirements.txt
+
+      - name: Unit tests Python (không cần DB)
+        run: |
+          python3 test_validation.py
+          python3 test_event_store.py
+          python3 test_supabase_auth.py
+          python3 test_revision_diff.py
+
+      - name: Import check backend (bắt lỗi cú pháp/import sớm)
+        run: python3 -c "import vercel_app"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Unit tests + syntax check frontend
+        run: |
+          node test_split.js
+          node --check static/app.js
+          node --check static/split.js
+          node --check static/sw.js
+          node --check static/auth.js
+
+      - name: requirements.txt và api/requirements.txt phải giống nhau
+        run: diff requirements.txt api/requirements.txt
