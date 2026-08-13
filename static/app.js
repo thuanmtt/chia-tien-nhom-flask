@@ -183,15 +183,14 @@
 
         // Đọc access token supabase-js đã lưu trong localStorage (ĐỒNG BỘ, không
         // chờ mạng) — chỉ tin khi còn hạn >30s; token hỏng/hết hạn coi như chưa
-        // đăng nhập, auth thật sẽ refresh sau.
+        // đăng nhập, auth thật sẽ refresh sau. Chỉ parse shape của supabase-js v2
+        // (session nằm thẳng trong value) — app chưa từng ship bản v1.
         function readCachedSupabaseToken() {
             try {
                 for (let i = 0; i < localStorage.length; i++) {
                     const key = localStorage.key(i);
                     if (!/^sb-.+-auth-token$/.test(key)) continue;
-                    const stored = JSON.parse(localStorage.getItem(key));
-                    // supabase-js v2 lưu thẳng session; bản cũ bọc trong currentSession
-                    const s = stored && (stored.currentSession || stored);
+                    const s = JSON.parse(localStorage.getItem(key));
                     if (s && s.access_token && s.expires_at
                             && s.expires_at * 1000 > Date.now() + 30000) {
                         return s.access_token;
@@ -206,24 +205,24 @@
         // session thật sau khi auth xong (cả hai null = cùng ẩn danh), lệch thì
         // request lại như cũ. KHÔNG gắn handler ở đây để lỗi 403/404 sớm không
         // kích toast trước khi auth sẵn sàng.
-        let earlyEventXhr = null;
-        let earlyEventToken = null;
-        let earlyEventCode = null;
+        let earlyEvent = null; // {xhr, token, code} — dùng đúng một lần rồi xóa cả cụm
         if (bootEventCode) {
-            earlyEventToken = readCachedSupabaseToken();
-            earlyEventCode = bootEventCode;
-            earlyEventXhr = $.ajax({
-                url: `/api/events/${bootEventCode}`,
-                method: 'GET',
-                headers: earlyEventToken ? { 'Authorization': 'Bearer ' + earlyEventToken } : {}
-            });
+            const earlyToken = readCachedSupabaseToken();
+            earlyEvent = {
+                code: bootEventCode,
+                token: earlyToken,
+                xhr: $.ajax({
+                    url: `/api/events/${bootEventCode}`,
+                    method: 'GET',
+                    headers: earlyToken ? { 'Authorization': 'Bearer ' + earlyToken } : {}
+                })
+            };
         }
 
         // Đang mở một sự kiện có sẵn? Che trang bằng overlay + đặt UI tạm theo
         // quyền dự đoán — người nhận link chỉ-xem sẽ không thấy "chớp" giao
         // diện chỉnh sửa trong lúc chờ server xác nhận quyền thật (can_edit).
-        const bootHasEvent = window.location.pathname.startsWith('/share/')
-            || !!urlEventCode || !!currentEventCode;
+        const bootHasEvent = !!bootEventCode;
         if (bootHasEvent) {
             showAppLoading(true);
             if (window.location.pathname.startsWith('/share/')) {
@@ -789,12 +788,11 @@
             // event code VÀ token lúc bắn trùng session hiện tại — lệch (token
             // vừa refresh / đổi tài khoản) thì bỏ, request lại với token thật.
             let req = null;
-            if (earlyEventXhr) {
-                const early = earlyEventXhr;
-                const matches = earlyEventCode === eventCode
-                    && earlyEventToken === AppAuth.accessToken();
-                earlyEventXhr = null;
-                if (matches) req = early;
+            if (earlyEvent) {
+                const matches = earlyEvent.code === eventCode
+                    && earlyEvent.token === AppAuth.accessToken();
+                if (matches) req = earlyEvent.xhr;
+                earlyEvent = null;
             }
             if (!req) {
                 req = $.ajax({
@@ -804,86 +802,86 @@
                 });
             }
             req.done(function(response) {
-                    if (response.success) {
-                        const eventData = response.event;
-                        currentEventCode = eventData.event_code;
+                if (response.success) {
+                    const eventData = response.event;
+                    currentEventCode = eventData.event_code;
 
-                        // Quyền chỉnh sửa do server xác nhận
-                        if (opts.forceViewOnly) {
-                            allowEdit = false;
-                            $('#loginToEditBanner').addClass('d-none');
+                    // Quyền chỉnh sửa do server xác nhận
+                    if (opts.forceViewOnly) {
+                        allowEdit = false;
+                        $('#loginToEditBanner').addClass('d-none');
+                    } else {
+                        allowEdit = !!eventData.can_edit;
+                        // Có quyền sửa nhưng chưa đăng nhập → banner mời đăng nhập
+                        $('#loginToEditBanner').toggleClass('d-none', !eventData.login_required_to_edit);
+                    }
+
+                    // Mốc updated_at cho optimistic locking khi lưu
+                    lastKnownUpdatedAt = eventData.updated_at || null;
+                    // Cài đặt chia sẻ hiện tại (cho modal Chia sẻ)
+                    shareAccess = eventData.share_access || 'link';
+                    shareRole = eventData.share_role || 'viewer';
+                    isOwner = !!eventData.is_owner;
+                    setSaveStatus(''); // dữ liệu vừa tải, chưa có thay đổi cần lưu
+
+                    // Cập nhật tên sự kiện
+                    $('#eventTitle').text(eventData.title);
+                    // Sau khi set currentEventCode hoặc tạo mới sự kiện, cập nhật eventCodeDisplay
+                    function updateEventCodeDisplay() {
+                        if (currentEventCode) {
+                            $('#eventCodeDisplay').text(currentEventCode);
                         } else {
-                            allowEdit = !!eventData.can_edit;
-                            // Có quyền sửa nhưng chưa đăng nhập → banner mời đăng nhập
-                            $('#loginToEditBanner').toggleClass('d-none', !eventData.login_required_to_edit);
+                            $('#eventCodeDisplay').text('');
                         }
-
-                        // Mốc updated_at cho optimistic locking khi lưu
-                        lastKnownUpdatedAt = eventData.updated_at || null;
-                        // Cài đặt chia sẻ hiện tại (cho modal Chia sẻ)
-                        shareAccess = eventData.share_access || 'link';
-                        shareRole = eventData.share_role || 'viewer';
-                        isOwner = !!eventData.is_owner;
-                        setSaveStatus(''); // dữ liệu vừa tải, chưa có thay đổi cần lưu
-
-                        // Cập nhật tên sự kiện
-                        $('#eventTitle').text(eventData.title);
-                        // Sau khi set currentEventCode hoặc tạo mới sự kiện, cập nhật eventCodeDisplay
-                        function updateEventCodeDisplay() {
-                            if (currentEventCode) {
-                                $('#eventCodeDisplay').text(currentEventCode);
-                            } else {
-                                $('#eventCodeDisplay').text('');
-                            }
-                        }
-                        updateEventCodeDisplay();
-
-                        // Cập nhật thành viên & nhóm chung quỹ
-                        members = eventData.members || [];
-                        couples = Array.isArray(eventData.couples) ? eventData.couples : [];
-                        renderMembers();
-
-                        // Cập nhật tỷ giá
-                        rates = (eventData.rates && typeof eventData.rates === 'object') ? eventData.rates : {};
-                        renderCurrencyDropdown();
-
-                        // Cập nhật chi phí — chuẩn hóa dữ liệu 'all' cũ thành
-                        // danh sách đích danh (ghi xuống DB ở lần lưu kế tiếp)
-                        expenses = eventData.expenses || [];
-                        SplitLogic.normalizeExpenses(expenses, members);
-                        editingExpenseIndex = null;
-                        $('#expenseSubmitBtn').text('Thêm Chi Phí');
-                        $('#cancelEditExpenseBtn').addClass('d-none');
-                        renderExpenses();
-
-                        // Cập nhật thông tin ngân hàng
-                        bankInfo = eventData.bankInfo || {};
-
-                        // Chỉ lưu event_code vào localStorage khi ở chế độ cho phép chỉnh sửa,
-                        // để tránh trường hợp mở link chỉ-xem rồi quay lại "/" vẫn vào được chế độ sửa
-                        if (allowEdit) {
-                            localStorage.setItem('currentEventCode', currentEventCode);
-                            rememberEvent(currentEventCode); // Thêm vào "Sự Kiện Của Tôi"
-                        }
-
-                        // Tự động tính toán khi tải sự kiện
-                        calculateSplit(false);
-
-                        // Cập nhật UI dựa trên chế độ chỉnh sửa
-                        updateUIForEditMode();
-                        showAppLoading(false);
-                    } else {
-                        showToast('Không tìm thấy sự kiện!', 'error');
-                        createNewEvent();
                     }
-            }).fail(function(xhr) {
-                    if (xhr && xhr.status === 403) {
-                        // Chế độ "Hạn chế" — chỉ chủ sở hữu truy cập được
-                        showToast('Sự kiện đang ở chế độ hạn chế — chỉ chủ sở hữu mới truy cập được.', 'error');
-                    } else {
-                        showToast('Lỗi khi tải sự kiện!', 'error');
+                    updateEventCodeDisplay();
+
+                    // Cập nhật thành viên & nhóm chung quỹ
+                    members = eventData.members || [];
+                    couples = Array.isArray(eventData.couples) ? eventData.couples : [];
+                    renderMembers();
+
+                    // Cập nhật tỷ giá
+                    rates = (eventData.rates && typeof eventData.rates === 'object') ? eventData.rates : {};
+                    renderCurrencyDropdown();
+
+                    // Cập nhật chi phí — chuẩn hóa dữ liệu 'all' cũ thành
+                    // danh sách đích danh (ghi xuống DB ở lần lưu kế tiếp)
+                    expenses = eventData.expenses || [];
+                    SplitLogic.normalizeExpenses(expenses, members);
+                    editingExpenseIndex = null;
+                    $('#expenseSubmitBtn').text('Thêm Chi Phí');
+                    $('#cancelEditExpenseBtn').addClass('d-none');
+                    renderExpenses();
+
+                    // Cập nhật thông tin ngân hàng
+                    bankInfo = eventData.bankInfo || {};
+
+                    // Chỉ lưu event_code vào localStorage khi ở chế độ cho phép chỉnh sửa,
+                    // để tránh trường hợp mở link chỉ-xem rồi quay lại "/" vẫn vào được chế độ sửa
+                    if (allowEdit) {
+                        localStorage.setItem('currentEventCode', currentEventCode);
+                        rememberEvent(currentEventCode); // Thêm vào "Sự Kiện Của Tôi"
                     }
+
+                    // Tự động tính toán khi tải sự kiện
+                    calculateSplit(false);
+
+                    // Cập nhật UI dựa trên chế độ chỉnh sửa
+                    updateUIForEditMode();
+                    showAppLoading(false);
+                } else {
+                    showToast('Không tìm thấy sự kiện!', 'error');
                     createNewEvent();
+                }
+            }).fail(function(xhr) {
+                if (xhr && xhr.status === 403) {
+                    // Chế độ "Hạn chế" — chỉ chủ sở hữu truy cập được
+                    showToast('Sự kiện đang ở chế độ hạn chế — chỉ chủ sở hữu mới truy cập được.', 'error');
+                } else {
+                    showToast('Lỗi khi tải sự kiện!', 'error');
+                }
+                createNewEvent();
             });
         }
 
@@ -1257,13 +1255,10 @@
                 }));
         }
 
+        // Tiền điều kiện: gọi qua ensureXlsx() — XLSX chắc chắn đã nạp
         function exportExpensesToExcel() {
             if (!expenses.length) {
                 showToast('Chưa có chi phí để xuất.', 'warning');
-                return;
-            }
-            if (typeof XLSX === 'undefined') {
-                showToast('Thư viện xuất Excel chưa tải xong, vui lòng thử lại.', 'error');
                 return;
             }
 
@@ -1334,13 +1329,10 @@
             return _pdfUnicodeFontPromise;
         }
 
+        // Tiền điều kiện: gọi qua ensureJsPdf() — jspdf + autotable chắc chắn đã nạp
         async function exportExpensesToPDF() {
             if (!expenses.length) {
                 showToast('Chưa có chi phí để xuất.', 'warning');
-                return;
-            }
-            if (!window.jspdf || !window.jspdf.jsPDF) {
-                showToast('Thư viện xuất PDF chưa tải xong, vui lòng thử lại.', 'error');
                 return;
             }
 
@@ -1356,11 +1348,6 @@
             } catch (e) {
                 console.warn(e);
                 showToast('Không tải được font tiếng Việt, PDF có thể hiển thị sai dấu.', 'warning');
-            }
-
-            if (typeof doc.autoTable !== 'function') {
-                showToast('Plugin bảng PDF chưa tải xong, vui lòng thử lại.', 'error');
-                return;
             }
 
             const expenseRows = buildExpenseExportRows();
