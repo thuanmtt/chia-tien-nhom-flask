@@ -1897,8 +1897,8 @@
                 if (members.includes(memberName)) {
                     showToast('Thành viên này đã được thêm vào danh sách!', 'warning');
                 } else {
-                    // Chốt danh sách CŨ trước khi thêm — dùng nếu người dùng chọn
-                    // không chia các khoản "Tất cả" cho người mới
+                    // Danh sách CŨ trước khi thêm — để nhận diện các khoản
+                    // đang chia cho đủ mọi người
                     const prevMembers = members.slice();
                     members.push(memberName);
                     renderMembers();
@@ -1909,24 +1909,24 @@
                     showToast(`Đã thêm thành viên "${memberName}"!`, 'success');
                     // Không cần gọi autoCalculate() vì đã được gọi trong renderMembers()
 
-                    // Các khoản "Tất cả" chia động theo danh sách hiện tại nên
-                    // người mới mặc định được tính vào — hỏi để người dùng quyết;
-                    // chọn "Không chia" thì chốt các khoản đó cho danh sách cũ.
-                    // Đóng hộp thoại (Hủy/ESC) = giữ hành vi cũ: chia cho người mới.
-                    const allCount = expenses.filter(e => e && e.benefitType !== 'selected').length;
-                    if (allCount > 0 && prevMembers.length > 0) {
+                    // Mọi khoản chi lưu người hưởng đích danh — người mới KHÔNG
+                    // tự được chia vào khoản cũ. Nếu có khoản đang chia cho đủ
+                    // thành viên cũ thì hỏi có chia thêm không; đóng hộp thoại
+                    // (Hủy/ESC) = không đụng gì.
+                    const fullCount = SplitLogic.countFullCoverage(expenses, prevMembers);
+                    if (fullCount > 0) {
                         showConfirm(
-                            `Đang có ${allCount} khoản chi chia cho "Tất cả". Có chia các khoản này cho "${memberName}" nữa không?`,
+                            `Có ${fullCount} khoản chi đang chia cho đủ mọi người. Chia thêm cho "${memberName}" không?`,
                             function () {
-                                SplitLogic.freezeAllExpenses(expenses, prevMembers);
+                                const added = SplitLogic.addBeneficiaryToFullCoverage(expenses, prevMembers, memberName);
                                 renderExpenses(); // đã gọi autoCalculate() bên trong
                                 saveEvent(false);
-                                showToast(`Đã giữ ${allCount} khoản chi cho ${prevMembers.length} thành viên cũ — "${memberName}" không bị tính vào các khoản đó.`, 'success');
+                                showToast(`Đã chia thêm ${added} khoản chi cho "${memberName}".`, 'success');
                             },
                             {
-                                okLabel: 'Không chia',
+                                okLabel: `Có, chia cho "${memberName}"`,
                                 okClass: 'btn-primary',
-                                cancelLabel: `Có, chia cho "${memberName}"`,
+                                cancelLabel: 'Không',
                             }
                         );
                     }

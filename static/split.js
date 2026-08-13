@@ -39,21 +39,6 @@
         return members;
     }
 
-    // "Chốt" các khoản đang chia cho tất cả (benefitType khác 'selected') thành
-    // 'selected' với danh sách members đưa vào — dùng khi thêm thành viên mới mà
-    // người dùng chọn KHÔNG chia các khoản cũ cho người mới. Sửa trực tiếp trên
-    // mảng expenses; trả về số khoản đã chốt.
-    function freezeAllExpenses(expenses, members) {
-        let count = 0;
-        (expenses || []).forEach(e => {
-            if (!e || e.benefitType === 'selected') return;
-            e.benefitType = 'selected';
-            e.beneficiaries = (members || []).slice();
-            count++;
-        });
-        return count;
-    }
-
     // Chuẩn hóa khi tải event: mọi khoản không-'selected' (dữ liệu 'all' cũ)
     // → 'selected' với snapshot đã lưu (lọc tên còn tồn tại; rỗng thì lấy
     // danh sách hiện tại). Sửa tại chỗ, trả về số khoản đã chuyển.
@@ -241,7 +226,6 @@
         getRateToVND: getRateToVND,
         amountInVND: amountInVND,
         getExpenseBeneficiaries: getExpenseBeneficiaries,
-        freezeAllExpenses: freezeAllExpenses,
         normalizeExpenses: normalizeExpenses,
         countFullCoverage: countFullCoverage,
         addBeneficiaryToFullCoverage: addBeneficiaryToFullCoverage,
