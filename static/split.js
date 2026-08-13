@@ -27,14 +27,12 @@
         return amt * rate;
     }
 
-    // Người hưởng của một chi phí:
-    // - 'all' (hoặc thiếu benefitType): LUÔN là danh sách thành viên HIỆN TẠI,
-    //   không dùng snapshot lúc tạo — để thành viên thêm sau vẫn được chia
-    //   vào các khoản "cho tất cả" đúng như UI hiển thị
-    // - 'selected': danh sách đã chọn, lọc theo thành viên còn tồn tại
+    // Người hưởng của một chi phí: LUÔN là danh sách beneficiaries đã lưu
+    // (lọc theo thành viên còn tồn tại), bất kể benefitType — khoản 'all'
+    // legacy được hiểu theo snapshot lúc tạo. Chỉ fallback về danh sách
+    // thành viên hiện tại khi thiếu/rỗng/toàn tên đã xóa (dữ liệu tay/cũ).
     function getExpenseBeneficiaries(expense, members) {
-        if (expense && expense.benefitType === 'selected'
-            && Array.isArray(expense.beneficiaries) && expense.beneficiaries.length > 0) {
+        if (expense && Array.isArray(expense.beneficiaries) && expense.beneficiaries.length > 0) {
             const valid = expense.beneficiaries.filter(m => members.includes(m));
             if (valid.length > 0) return valid;
         }

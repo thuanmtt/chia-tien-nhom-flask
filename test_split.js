@@ -72,16 +72,38 @@ test('nhiều khoản chia lẻ: mọi giao dịch vẫn tất toán chính xác
     assertTransfersSettle(r);
 });
 
-test("benefitType 'all' dùng danh sách thành viên HIỆN TẠI, không dùng snapshot", () => {
-    // Chi phí tạo lúc chỉ có A, B (beneficiaries snapshot cũ) — sau đó thêm C
+test("khoản chi có snapshot beneficiaries: dùng snapshot, bất kể benefitType 'all'", () => {
+    // Chi phí tạo lúc chỉ có A, B (snapshot đã lưu) — C vào nhóm sau
     const r = S.computeSplit({
         members: ['A', 'B', 'C'],
         expenses: [{ title: 'ăn', amount: 90000, payer: 'A', benefitType: 'all', beneficiaries: ['A', 'B'] }],
     });
-    // C cũng phải chia: mỗi người 30000 → B và C mỗi người chuyển A 30000
-    assert.strictEqual(r.roundedBalances['C'], -30000);
-    assert.strictEqual(r.transfers.length, 2);
+    // C KHÔNG bị chia: chỉ B nợ A 45000
+    assert.strictEqual(r.roundedBalances['C'], 0);
+    assert.deepStrictEqual(r.transfers, [{ from: 'B', to: 'A', amount: 45000 }]);
     assertTransfersSettle(r);
+});
+
+test('khoản chi KHÔNG có snapshot (thiếu/rỗng): fallback danh sách hiện tại', () => {
+    const r = S.computeSplit({
+        members: ['A', 'B', 'C'],
+        expenses: [
+            { title: 'x', amount: 30000, payer: 'A', benefitType: 'all' },
+            { title: 'y', amount: 30000, payer: 'A', benefitType: 'all', beneficiaries: [] },
+        ],
+    });
+    // Cả 2 khoản chia đều 3 người: B và C mỗi người nợ A 20000
+    assert.strictEqual(r.roundedBalances['B'], -20000);
+    assert.strictEqual(r.roundedBalances['C'], -20000);
+    assertTransfersSettle(r);
+});
+
+test('snapshot toàn tên đã xóa: fallback danh sách hiện tại', () => {
+    const r = S.computeSplit({
+        members: ['A', 'B'],
+        expenses: [{ title: 'cũ', amount: 60000, payer: 'A', benefitType: 'all', beneficiaries: ['X', 'Y'] }],
+    });
+    assert.deepStrictEqual(r.transfers, [{ from: 'B', to: 'A', amount: 30000 }]);
 });
 
 test("benefitType 'selected' chỉ chia cho người được chọn còn tồn tại", () => {
