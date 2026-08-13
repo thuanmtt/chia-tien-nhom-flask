@@ -908,12 +908,7 @@
             return list.filter(exp => {
                 if (q && !normalizeViet(exp.title).includes(q)) return false;
                 if (payer && exp.payer !== payer) return false;
-                if (benef) {
-                    // Đồng bộ với getExpenseBeneficiaries: không phải 'selected' = cho tất cả
-                    const isAll = exp.benefitType !== 'selected';
-                    const inList = (exp.beneficiaries || []).includes(benef);
-                    if (!isAll && !inList) return false;
-                }
+                if (benef && !getExpenseBeneficiaries(exp).includes(benef)) return false;
                 if (fromStr || toStr) {
                     const dateStr = getExpenseDateKey(exp, dateField);
                     if (!dateStr) return false;
@@ -1112,14 +1107,8 @@
                 const stt = sortOrder === 'newest' ? sorted.length - displayIndex : displayIndex + 1;
                 const cur = getCurrencyOfExpense(e);
                 const vnd = amountInVND(e);
-                let beneficiaries;
-                if (e.benefitType === 'all') {
-                    beneficiaries = 'Tất cả';
-                } else if (e.beneficiaries && e.beneficiaries.length) {
-                    beneficiaries = e.beneficiaries.join(', ');
-                } else {
-                    beneficiaries = '';
-                }
+                // Luôn ghi tên đích danh (danh sách thực tế sau lọc/fallback)
+                const beneficiaries = getExpenseBeneficiaries(e).join(', ');
                 return {
                     stt,
                     title: e.title || '',
@@ -1457,19 +1446,15 @@
                 const stt = sortOrder === 'newest'
                     ? expenses.length - displayIndex
                     : displayIndex + 1;
+                // Luôn nêu tên đích danh — không còn nhãn "tất cả" ẩn danh
                 let benefitInfo = '';
-                if (expense.benefitType === 'all') {
-                    benefitInfo = 'cho tất cả mọi người';
-                } else if (expense.beneficiaries && expense.beneficiaries.length > 0) {
-                    if (expense.beneficiaries.length === 1) {
-                        benefitInfo = `chỉ cho ${expense.beneficiaries[0]}`;
-                    } else if (expense.beneficiaries.length === 2) {
-                        benefitInfo = `cho ${expense.beneficiaries.join(' và ')}`;
-                    } else if (expense.beneficiaries.length < members.length) {
-                        benefitInfo = `cho ${expense.beneficiaries.length} người: (${expense.beneficiaries.join(', ')})`;
-                    } else {
-                        benefitInfo = 'cho tất cả mọi người';
-                    }
+                const bens = getExpenseBeneficiaries(expense);
+                if (bens.length === 1) {
+                    benefitInfo = `chỉ cho ${bens[0]}`;
+                } else if (bens.length === 2) {
+                    benefitInfo = `cho ${bens.join(' và ')}`;
+                } else if (bens.length > 2) {
+                    benefitInfo = `cho ${bens.length} người: (${bens.join(', ')})`;
                 }
 
                 const expCurrency = getCurrencyOfExpense(expense);
@@ -3126,7 +3111,8 @@
             $('#expenseTitle').val(expense.title);
             $('#expenseAmount').val(expense.amount);
             $('#expensePayer').val(expense.payer);
-            $('#benefitType').val(expense.benefitType || 'all').trigger('change');
+            // Dữ liệu đã chuẩn hóa — form sửa luôn ở chế độ chọn đích danh
+            $('#benefitType').val('selected').trigger('change');
             const curEdit = getCurrencyOfExpense(expense);
             if ($('#expenseCurrency').find('option').filter(function () { return this.value === curEdit; }).length === 0) {
                 $('#expenseCurrency').append($('<option>').val(curEdit).text(curEdit));
@@ -3150,15 +3136,13 @@
             // Cập nhật preview sau khi set giá trị
             updateAmountPreview();
 
-            // Nếu là chi tiêu cho một số người, chọn lại các checkbox
-            if (expense.benefitType === 'selected' && Array.isArray(expense.beneficiaries)) {
-                // Bỏ trạng thái cũ trước, rồi tick theo value (an toàn với tên có dấu/khoảng trắng)
-                $('#beneficiariesList .beneficiary-checkbox').prop('checked', false);
-                const wanted = new Set(expense.beneficiaries);
-                $('#beneficiariesList .beneficiary-checkbox').each(function () {
-                    if (wanted.has(this.value)) this.checked = true;
-                });
-            }
+            // Tick theo danh sách hưởng thực tế (đã lọc + fallback)
+            // — an toàn với tên có dấu/khoảng trắng nhờ so theo value
+            $('#beneficiariesList .beneficiary-checkbox').prop('checked', false);
+            const wanted = new Set(getExpenseBeneficiaries(expense));
+            $('#beneficiariesList .beneficiary-checkbox').each(function () {
+                if (wanted.has(this.value)) this.checked = true;
+            });
 
             // Bật edit mode: giữ nguyên expense trong mảng, chỉ đánh dấu index đang sửa
             editingExpenseIndex = index;
