@@ -98,24 +98,31 @@ chia-tien-nhom-flask/
 ## API Endpoints
 
 ### Events
-- `POST /api/events` - Tạo sự kiện mới (response chứa `edit_key` — chỉ trả về 1 lần duy nhất)
-- `GET /api/events/<event_code>` - Lấy thông tin sự kiện. Nhận header `X-Edit-Key`
-  (tùy chọn) và trả về cờ `can_edit` cho biết key đó có quyền sửa không —
-  UI dựa vào cờ này để hiện giao diện chỉnh sửa hay chỉ xem. Không bao giờ trả `edit_key`.
-- `PUT /api/events/<event_code>` - Cập nhật sự kiện (yêu cầu header `X-Edit-Key`).
-  Hỗ trợ optimistic locking: gửi kèm `expectedUpdatedAt` (giá trị `updated_at`
-  client đang biết) — nếu server đã có bản mới hơn sẽ trả 409 thay vì ghi đè.
-  Response trả `updated_at` mới để client dùng cho lần lưu sau.
-- `DELETE /api/events/<event_code>` - Xóa sự kiện (yêu cầu header `X-Edit-Key`)
+- `POST /api/events` - Tạo sự kiện mới (yêu cầu đăng nhập Supabase —
+  `Authorization: Bearer <token>`; người tạo trở thành chủ sở hữu)
+- `GET /api/events/<event_code>` - Lấy thông tin sự kiện. Trả cờ `can_edit`
+  (có quyền sửa VÀ đã đăng nhập), `is_owner`, `login_required_to_edit` — UI dựa
+  vào đó để hiện giao diện chỉnh sửa hay chỉ xem.
+- `PUT /api/events/<event_code>` - Cập nhật sự kiện (yêu cầu đăng nhập + quyền
+  sửa: chủ sở hữu / người được mời vai trò editor / chia sẻ "ai có link đều
+  chỉnh sửa"). Hỗ trợ optimistic locking: gửi kèm `expectedUpdatedAt` (giá trị
+  `updated_at` client đang biết) — nếu server đã có bản mới hơn sẽ trả 409 thay
+  vì ghi đè. Response trả `updated_at` mới để client dùng cho lần lưu sau.
+- `DELETE /api/events/<event_code>` - Xóa sự kiện (chỉ chủ sở hữu; sự kiện chưa
+  có chủ thì ai đăng nhập cũng xóa được)
+- `PUT /api/events/<event_code>/sharing` - Đổi quyền truy cập kiểu Google Docs
+  (`restricted`/`link` + `viewer`/`editor`)
+- `GET /api/events/<event_code>/revisions`, `POST .../restore` - Lịch sử chỉnh
+  sửa và khôi phục
+- `GET/POST/DELETE /api/events/<event_code>/collaborators` - Người được mời
+  đích danh (chỉ chủ sở hữu quản lý)
 
-Link chia sẻ:
-- Chỉ xem: `/?event_code=<event_code>`
-- Chỉnh sửa: `/?event_code=<event_code>&key=<edit_key>`
+Link chia sẻ (duy nhất một dạng):
+- `/?event_code=<event_code>` — quyền xem/sửa do cài đặt chia sẻ của sự kiện
+  quyết định, không còn key trong URL. Link cũ có `&key=...` vẫn mở được
+  (tham số bị bỏ qua).
 - `/share/<event_code>` và `/event/<event_code>` (định dạng cũ) redirect về
   `/?event_code=<event_code>` để các link đã gửi đi không bị chết.
-
-Sự kiện tạo trước khi có cơ chế `edit_key` (cột NULL trong DB) sẽ được "nhận" key
-từ lần ghi hợp lệ đầu tiên có gửi `X-Edit-Key`; từ đó về sau key này là bắt buộc.
 
 ### Banks
 - `GET /api/banks` - Lấy danh sách ngân hàng
@@ -138,7 +145,7 @@ từ lần ghi hợp lệ đầu tiên có gửi `X-Edit-Key`; từ đó về sa
 
 Nếu database cũ (JSON blob, ví dụ Neon) còn dữ liệu cần giữ, chạy `migrate_to_supabase.py`
 để chuyển sang schema quan hệ mới (chạy lại được — upsert theo `event_code`,
-giữ nguyên `event_code`/`edit_key` nên link chia sẻ cũ vẫn sống):
+giữ nguyên `event_code` nên link chia sẻ cũ vẫn sống):
 
 ```bash
 OLD_DATABASE_URL=postgres://...(Neon) \
@@ -180,7 +187,7 @@ Ví dụ: `250115A1B2C3D4`
 ## Database Schema
 
 Schema quan hệ, xem chi tiết ở `schema.sql`. Bảng `events` (title, event_code,
-edit_key, owner_id, created_at, updated_at) là bảng chính; các bảng con `members`,
+owner_id, share_access, share_role, created_at, updated_at) là bảng chính; các bảng con `members`,
 `expenses`, `expense_beneficiaries`, `member_bank_info`, `couples`, `couple_members`,
 `event_rates` lưu chi tiết theo `event_id`. API vẫn nhận/trả nguyên document JSON
 như cũ — `event_store.py` lo việc decompose/compose giữa document và các bảng.

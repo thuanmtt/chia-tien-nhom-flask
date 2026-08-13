@@ -7,7 +7,10 @@ import json
 import re
 import secrets
 import string
+import time
 import uuid
+from collections import namedtuple
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -42,9 +45,16 @@ app.config['MAX_CONTENT_LENGTH'] = 512 * 1024
 
 
 def _client_ip():
+    # Key cho rate limiter. x-vercel-forwarded-for do platform đặt, client không
+    # giả mạo được. x-forwarded-for thì client có thể ĐỘN THÊM phần tử đầu →
+    # nếu phải dùng, lấy phần tử CUỐI (hop do proxy gần nhất ghi) để không ai
+    # tự cấp cho mình một key limiter mới mỗi request.
+    vercel_fwd = request.headers.get('x-vercel-forwarded-for', '')
+    if vercel_fwd:
+        return vercel_fwd.split(',')[0].strip()
     fwd = request.headers.get('x-forwarded-for', '')
     if fwd:
-        return fwd.split(',')[0].strip()
+        return fwd.split(',')[-1].strip()
     return request.remote_addr or '127.0.0.1'
 
 
@@ -57,6 +67,55 @@ limiter = Limiter(
     storage_uri=os.environ.get('RATELIMIT_STORAGE_URI', 'memory://'),
     headers_enabled=True,
 )
+
+if os.environ.get('VERCEL') and not os.environ.get('RATELIMIT_STORAGE_URI'):
+    # Không chặn deploy nhưng phải thấy được trong log: các limit (đặc biệt
+    # /api/auth/login chống dò mật khẩu) đang gần như vô hiệu.
+    app.logger.warning(
+        'RATELIMIT_STORAGE_URI chưa được đặt — rate limit dùng memory:// '
+        'gần như vô hiệu trên serverless. Hãy trỏ tới Redis (ví dụ Upstash).')
+
+
+# CSP: allowlist đúng những origin trang đang dùng. index.html KHÔNG được có
+# script inline (gtag init/speed-insights đã tách ra /static/*.js) — thêm script
+# inline mới sẽ bị chặn; thêm CDN/nguồn mới thì phải bổ sung vào đây.
+# connect-src: supabase (auth), google-analytics (beacon), vitals (Vercel),
+# qr.sepay.vn (tải QR bằng fetch), cdn.jsdelivr.net (font DejaVu cho jsPDF).
+_SUPABASE_ORIGIN = (os.environ.get('SUPABASE_URL') or '').rstrip('/')
+_CSP = '; '.join([
+    "default-src 'self'",
+    "script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com "
+    "https://cdn.sheetjs.com https://www.googletagmanager.com https://cdn.vercel-insights.com",
+    # 'unsafe-inline' cho style: Bootstrap/select2/Chart.js đều set style inline
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
+    "font-src 'self' data: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
+    "img-src 'self' data: blob: https://qr.sepay.vn "
+    "https://www.googletagmanager.com https://*.google-analytics.com",
+    ("connect-src 'self' https://*.google-analytics.com https://www.googletagmanager.com "
+     "https://vitals.vercel-insights.com https://qr.sepay.vn https://cdn.jsdelivr.net"
+     + (f' {_SUPABASE_ORIGIN}' if _SUPABASE_ORIGIN else '')),
+    "worker-src 'self'",
+    "manifest-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+])
+
+
+@app.after_request
+def _security_headers(response):
+    """Header bảo mật cho MỌI response Flask trả (trang chính, sw.js, API).
+    /static/* trên production do @vercel/static phục vụ — header cho chúng
+    nằm trong vercel.json."""
+    h = response.headers
+    h.setdefault('Content-Security-Policy', _CSP)
+    h.setdefault('X-Content-Type-Options', 'nosniff')
+    h.setdefault('X-Frame-Options', 'DENY')  # chống clickjacking (kèm frame-ancestors)
+    h.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    h.setdefault('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+    h.setdefault('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+    return response
 
 
 @app.errorhandler(429)
@@ -95,45 +154,91 @@ def _collaborator_role(cursor, event_id, user_id):
     return row['role'] if isinstance(row, dict) else row[0]
 
 
-def _check_edit_permission(cursor, event_code, allow_link_editor=True):
-    """Kiểm tra quyền sửa/xóa event.
+@contextmanager
+def transaction(conn):
+    """Transaction thủ công trên connection autocommit: BEGIN → yield cursor →
+    COMMIT; lỗi thì ROLLBACK rồi re-raise; cursor luôn được đóng. `return`
+    bên trong khối with vẫn COMMIT (transaction chỉ đọc thì COMMIT vô hại,
+    đồng thời nhả khóa FOR UPDATE)."""
+    cursor = conn.cursor()
+    try:
+        cursor.execute('BEGIN')
+        yield cursor
+        cursor.execute('COMMIT')
+    except Exception:
+        try:
+            cursor.execute('ROLLBACK')
+        except Exception:
+            # ROLLBACK có thể fail nếu connection đã chết — không che lỗi gốc
+            pass
+        raise
+    finally:
+        cursor.close()
 
-    Trả về (status, event_id, updated_at) với status: 'not_found' | 'forbidden' | 'ok'.
-    Quyền hợp lệ khi: là owner (JWT Supabase) HOẶC là collaborator vai trò
-    'editor' HOẶC event chia sẻ ở chế độ "ai có link đều chỉnh sửa"
-    (share_access='link' + share_role='editor') — hai nhánh sau không áp dụng
-    cho DELETE (allow_link_editor=False) — HOẶC event không có chủ
-    (owner_id IS NULL, legacy/migrate): mặc định ai đăng nhập cũng sửa/xóa được.
-    Đăng nhập được kiểm ở từng route (401) TRƯỚC khi gọi hàm này (403)."""
-    cursor.execute(
-        '''SELECT id, owner_id, updated_at, share_access, share_role
-           FROM events WHERE event_code = %s''',
-        (event_code,),
-    )
+
+# Quyền của MỘT user trên MỘT event — nguồn duy nhất cho mọi route (GET/PUT/
+# DELETE/sharing/revisions/collaborators). Hai query danh sách (my_events,
+# load_events_summary) buộc phải lặp lại logic may_view bằng SQL — đổi rule
+# ở đây thì đổi cả hai chỗ đó.
+EventAccess = namedtuple('EventAccess', [
+    'event_id', 'owner_id', 'ownerless', 'is_owner', 'collab_role',
+    'share_access', 'share_role', 'title', 'created_at', 'updated_at',
+    'may_view', 'may_edit', 'may_delete',
+])
+
+
+def _event_access(cursor, event_code, user_id, for_update=False):
+    """Đọc event + tính toàn bộ quyền của user_id trên nó. None nếu không tồn tại.
+
+    Quyền: owner toàn quyền; event KHÔNG chủ (owner_id NULL, legacy/migrate) ai
+    đăng nhập cũng sửa VÀ xóa được, luôn xem được; collaborator 'editor' và
+    link-editor (share 'link'+'editor') sửa được nhưng KHÔNG xóa; 'restricted'
+    chỉ owner/người được mời xem. may_edit/may_delete là QUYỀN thuần — đăng
+    nhập (401) do route kiểm trước. for_update=True khóa dòng event (FOR
+    UPDATE) đến hết transaction — bắt buộc với mọi đường ghi để optimistic
+    locking không bị race (check updated_at và ghi phải nhìn cùng một bản).
+
+    Chấp nhận cả cursor thường lẫn RealDictCursor."""
+    sql = '''SELECT id, owner_id, share_access, share_role, title,
+                    created_at, updated_at
+             FROM events WHERE event_code = %s'''
+    if for_update:
+        sql += ' FOR UPDATE'
+    cursor.execute(sql, (event_code,))
     row = cursor.fetchone()
     if row is None:
-        return 'not_found', None, None
-    event_id, owner_id, updated_at, share_access, share_role = row
+        return None
+    if isinstance(row, dict):
+        event_id, owner_id, share_access, share_role = (
+            row['id'], row['owner_id'], row['share_access'], row['share_role'])
+        title, created_at, updated_at = row['title'], row['created_at'], row['updated_at']
+    else:
+        (event_id, owner_id, share_access, share_role,
+         title, created_at, updated_at) = row
 
-    # Event không có chủ — mặc định mở cho mọi người (đã đăng nhập)
-    if owner_id is None:
-        return 'ok', event_id, updated_at
+    ownerless = owner_id is None
+    is_owner = bool(owner_id and user_id and str(owner_id) == user_id)
+    # Owner/ownerless đã toàn quyền — khỏi tốn query collaborator
+    collab_role = None
+    if not ownerless and not is_owner:
+        collab_role = _collaborator_role(cursor, event_id, user_id)
 
-    user_id = request_user_id(request)
-    if user_id and str(owner_id) == user_id:
-        return 'ok', event_id, updated_at
+    link_editor = share_access == 'link' and share_role == 'editor'
+    may_view = ownerless or is_owner or bool(collab_role) or share_access != 'restricted'
+    may_edit = ownerless or is_owner or collab_role == 'editor' or link_editor
+    may_delete = ownerless or is_owner
+    return EventAccess(event_id, owner_id, ownerless, is_owner, collab_role,
+                       share_access, share_role, title, created_at, updated_at,
+                       may_view, may_edit, may_delete)
 
-    # Người được mời đích danh vai trò "người chỉnh sửa": sửa nội dung + đổi
-    # chia sẻ được, nhưng không xóa event (đi cùng cờ allow_link_editor, giống
-    # link-editor — DELETE gọi với allow_link_editor=False)
-    if allow_link_editor and user_id and _collaborator_role(cursor, event_id, user_id) == 'editor':
-        return 'ok', event_id, updated_at
 
-    # Chia sẻ kiểu Google Docs: "Bất kỳ ai có đường liên kết — Người chỉnh sửa"
-    if allow_link_editor and share_access == 'link' and share_role == 'editor':
-        return 'ok', event_id, updated_at
-
-    return 'forbidden', event_id, updated_at
+def _mask_email(name):
+    """Che email trong output cho người không phải owner quản lý:
+    'tuan@gmail.com' → 't***@gmail.com'. Username (không có '@') giữ nguyên."""
+    if not name or '@' not in name:
+        return name
+    local, _, domain = name.partition('@')
+    return (local[:1] or '*') + '***@' + domain
 
 
 def _actor_info(cursor, claims):
@@ -173,22 +278,6 @@ _SHARE_LABEL = {
 # Người được mời đích danh — chỉ owner quản lý danh sách
 _MAX_COLLABORATORS = 50
 _COLLAB_ROLE_LABEL = {'viewer': 'người xem', 'editor': 'người chỉnh sửa'}
-
-
-def _require_owner(cursor, event_code, claims):
-    """Chỉ owner quản lý danh sách người có quyền truy cập.
-
-    Trả (status, event_id, owner_id) với status 'not_found' | 'forbidden' | 'ok'.
-    Event legacy (owner_id NULL) → 'forbidden' (không có owner để quản lý)."""
-    cursor.execute('SELECT id, owner_id FROM events WHERE event_code = %s', (event_code,))
-    row = cursor.fetchone()
-    if row is None:
-        return 'not_found', None, None
-    event_id, owner_id = row
-    user_id = (claims or {}).get('sub')
-    if not (owner_id and user_id and str(owner_id) == user_id):
-        return 'forbidden', event_id, owner_id
-    return 'ok', event_id, owner_id
 
 
 def _resolve_identifier(cursor, identifier):
@@ -235,14 +324,22 @@ def _database_url():
 
 
 _conn = None
+_conn_last_ok = 0.0
+# Ping (SELECT 1) chỉ khi connection chưa được xác nhận trong khoảng này —
+# đỡ một round-trip DB cho MỌI request trên instance đang ấm. Connection chết
+# trong khoảng này thì request lỗi 1 lần rồi lần sau reconnect.
+_CONN_PING_INTERVAL = 30  # giây
 
 
 def get_db_connection():
-    global _conn
+    global _conn, _conn_last_ok
     if _conn is not None and not _conn.closed:
+        if time.monotonic() - _conn_last_ok < _CONN_PING_INTERVAL:
+            return _conn
         try:
             with _conn.cursor() as c:
                 c.execute('SELECT 1')
+            _conn_last_ok = time.monotonic()
             return _conn
         except psycopg2.Error:
             try:
@@ -252,6 +349,7 @@ def get_db_connection():
             _conn = None
     _conn = psycopg2.connect(_database_url(), connect_timeout=5)
     _conn.autocommit = True
+    _conn_last_ok = time.monotonic()
     return _conn
 
 
@@ -295,34 +393,28 @@ def create_event():
         except ValidationError as e:
             return jsonify({'success': False, 'error': str(e)}), 400
 
-        event_code = generate_event_code()
-
         conn = get_db_connection()
-        cursor = conn.cursor()
-        # Ghi nhiều bảng phải nằm trong 1 transaction (connection đang autocommit
-        # nên mở transaction thủ công bằng BEGIN/COMMIT)
-        try:
-            cursor.execute('BEGIN')
-            cursor.execute(
-                '''INSERT INTO events (event_code, title, owner_id)
-                   VALUES (%s, %s, %s) RETURNING id, updated_at''',
-                (event_code, data['title'], user_id),
-            )
-            event_id, created_updated_at = cursor.fetchone()
-            replace_event_children(cursor, event_id, data)
-            actor_id, actor_name = _actor_info(cursor, claims)
-            record_revision(cursor, event_id, actor_id, actor_name, 'create',
-                            [{'a': 'add', 'o': 'event', 't': 'Tạo sự kiện'}], data)
-            cursor.execute('COMMIT')
-        except Exception:
+        # Mã sự kiện ngẫu nhiên có thể (hiếm) trùng UNIQUE — thử lại với mã mới
+        # thay vì trả 500. UniqueViolation khác không thể xảy ra ở đây (tên
+        # thành viên đã dedupe trước khi INSERT).
+        for attempt in range(3):
+            event_code = generate_event_code()
             try:
-                cursor.execute('ROLLBACK')
-            except Exception:
-                # ROLLBACK có thể fail nếu connection đã chết — không che lỗi gốc
-                pass
-            raise
-        finally:
-            cursor.close()
+                with transaction(conn) as cursor:
+                    cursor.execute(
+                        '''INSERT INTO events (event_code, title, owner_id)
+                           VALUES (%s, %s, %s) RETURNING id, updated_at''',
+                        (event_code, data['title'], user_id),
+                    )
+                    event_id, created_updated_at = cursor.fetchone()
+                    replace_event_children(cursor, event_id, data)
+                    actor_id, actor_name = _actor_info(cursor, claims)
+                    record_revision(cursor, event_id, actor_id, actor_name, 'create',
+                                    [{'a': 'add', 'o': 'event', 't': 'Tạo sự kiện'}], data)
+                break
+            except psycopg2.errors.UniqueViolation:
+                if attempt == 2:
+                    raise
 
         return jsonify({
             'success': True,
@@ -353,10 +445,9 @@ def lookup_events():
             return jsonify({'success': True, 'events': []})
 
         conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        # Event ở chế độ "Hạn chế" chỉ hiện với chính owner (đăng nhập)
-        events = load_events_summary(cursor, codes, viewer_user_id=request_user_id(request))
-        cursor.close()
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+            # Event ở chế độ "Hạn chế" chỉ hiện với chính owner (đăng nhập)
+            events = load_events_summary(cursor, codes, viewer_user_id=request_user_id(request))
         return jsonify({'success': True, 'events': events})
     except HTTPException:
         raise
@@ -375,24 +466,24 @@ def my_events():
         if not user_id:
             return jsonify({'success': False, 'error': 'Vui lòng đăng nhập.'}), 401
         conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            '''SELECT e.event_code, e.title, e.updated_at,
-                      COALESCE(e.owner_id = %s::uuid, false) AS owned
-               FROM events e
-               WHERE e.owner_id = %s::uuid
-                  OR EXISTS (SELECT 1 FROM event_collaborators c
-                             WHERE c.event_id = e.id AND c.user_id = %s::uuid)
-                  -- Bookmark không mang quyền: event Hạn chế chỉ hiện qua
-                  -- nhánh owner/được mời ở trên, không qua nhánh saved.
-                  OR (EXISTS (SELECT 1 FROM saved_events s
-                              WHERE s.event_id = e.id AND s.user_id = %s::uuid)
-                      AND (e.share_access <> 'restricted' OR e.owner_id IS NULL))
-               ORDER BY e.updated_at DESC''',
-            (user_id, user_id, user_id, user_id),
-        )
-        rows = cursor.fetchall()
-        cursor.close()
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+            cursor.execute(
+                '''SELECT e.event_code, e.title, e.updated_at,
+                          COALESCE(e.owner_id = %s::uuid, false) AS owned
+                   FROM events e
+                   WHERE e.owner_id = %s::uuid
+                      OR EXISTS (SELECT 1 FROM event_collaborators c
+                                 WHERE c.event_id = e.id AND c.user_id = %s::uuid)
+                      -- Bookmark không mang quyền: event Hạn chế chỉ hiện qua
+                      -- nhánh owner/được mời ở trên, không qua nhánh saved.
+                      -- (Lặp lại rule may_view của _event_access bằng SQL.)
+                      OR (EXISTS (SELECT 1 FROM saved_events s
+                                  WHERE s.event_id = e.id AND s.user_id = %s::uuid)
+                          AND (e.share_access <> 'restricted' OR e.owner_id IS NULL))
+                   ORDER BY e.updated_at DESC''',
+                (user_id, user_id, user_id, user_id),
+            )
+            rows = cursor.fetchall()
         return jsonify({'success': True, 'events': [
             {
                 'event_code': r['event_code'],
@@ -426,23 +517,22 @@ def save_my_events():
             return jsonify({'success': True})
 
         conn = get_db_connection()
-        cursor = conn.cursor()
-        # Cap 200/user: đếm và chèn trong CÙNG MỘT câu lệnh (thu hẹp race giữa
-        # đếm và chèn khi 2 request save đồng thời); mã đã lưu bị loại TRƯỚC
-        # khi LIMIT nên không "ăn" mất suất của mã mới trong cùng batch.
-        cursor.execute(
-            '''INSERT INTO saved_events (user_id, event_id)
-               SELECT %s::uuid, e.id FROM events e
-               WHERE e.event_code = ANY(%s)
-                 AND NOT EXISTS (SELECT 1 FROM saved_events s
-                                 WHERE s.user_id = %s::uuid AND s.event_id = e.id)
-               ORDER BY e.updated_at DESC
-               LIMIT greatest(0, %s - (SELECT count(*) FROM saved_events
-                                       WHERE user_id = %s::uuid))
-               ON CONFLICT DO NOTHING''',
-            (user_id, codes, user_id, _SAVED_EVENTS_CAP, user_id),
-        )
-        cursor.close()
+        with conn.cursor() as cursor:
+            # Cap 200/user: đếm và chèn trong CÙNG MỘT câu lệnh (thu hẹp race giữa
+            # đếm và chèn khi 2 request save đồng thời); mã đã lưu bị loại TRƯỚC
+            # khi LIMIT nên không "ăn" mất suất của mã mới trong cùng batch.
+            cursor.execute(
+                '''INSERT INTO saved_events (user_id, event_id)
+                   SELECT %s::uuid, e.id FROM events e
+                   WHERE e.event_code = ANY(%s)
+                     AND NOT EXISTS (SELECT 1 FROM saved_events s
+                                     WHERE s.user_id = %s::uuid AND s.event_id = e.id)
+                   ORDER BY e.updated_at DESC
+                   LIMIT greatest(0, %s - (SELECT count(*) FROM saved_events
+                                           WHERE user_id = %s::uuid))
+                   ON CONFLICT DO NOTHING''',
+                (user_id, codes, user_id, _SAVED_EVENTS_CAP, user_id),
+            )
         return jsonify({'success': True})
     except HTTPException:
         raise
@@ -460,13 +550,12 @@ def unsave_my_event(event_code):
         if not user_id:
             return jsonify({'success': False, 'error': 'Vui lòng đăng nhập.'}), 401
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            '''DELETE FROM saved_events s USING events e
-               WHERE s.event_id = e.id AND s.user_id = %s::uuid AND e.event_code = %s''',
-            (user_id, event_code),
-        )
-        cursor.close()
+        with conn.cursor() as cursor:
+            cursor.execute(
+                '''DELETE FROM saved_events s USING events e
+                   WHERE s.event_id = e.id AND s.user_id = %s::uuid AND e.event_code = %s''',
+                (user_id, event_code),
+            )
         return jsonify({'success': True})
     except HTTPException:
         raise
@@ -492,10 +581,9 @@ def get_profile():
         if not user_id:
             return jsonify({'success': False, 'error': 'Vui lòng đăng nhập.'}), 401
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT username FROM user_profiles WHERE user_id = %s::uuid', (user_id,))
-        row = cursor.fetchone()
-        cursor.close()
+        with conn.cursor() as cursor:
+            cursor.execute('SELECT username FROM user_profiles WHERE user_id = %s::uuid', (user_id,))
+            row = cursor.fetchone()
         return jsonify({'success': True, 'username': row[0] if row else None})
     except HTTPException:
         raise
@@ -519,28 +607,24 @@ def update_profile():
             return jsonify({'success': False, 'error': _USERNAME_ERROR}), 400
         username = raw.strip().lower()
 
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        if not username:
-            # Để trống = xóa username
-            cursor.execute('DELETE FROM user_profiles WHERE user_id = %s::uuid', (user_id,))
-            cursor.close()
-            return jsonify({'success': True, 'username': None})
-        if '@' in username or not _USERNAME_RE.match(username):
-            cursor.close()
+        if username and ('@' in username or not _USERNAME_RE.match(username)):
             return jsonify({'success': False, 'error': _USERNAME_ERROR}), 400
-        try:
-            cursor.execute(
-                '''INSERT INTO user_profiles (user_id, username, updated_at)
-                   VALUES (%s::uuid, %s, now())
-                   ON CONFLICT (user_id) DO UPDATE
-                   SET username = EXCLUDED.username, updated_at = now()''',
-                (user_id, username),
-            )
-        except psycopg2.errors.UniqueViolation:
-            cursor.close()
-            return jsonify({'success': False, 'error': 'Username này đã có người dùng, vui lòng chọn tên khác.'}), 409
-        cursor.close()
+        conn = get_db_connection()
+        with conn.cursor() as cursor:
+            if not username:
+                # Để trống = xóa username
+                cursor.execute('DELETE FROM user_profiles WHERE user_id = %s::uuid', (user_id,))
+                return jsonify({'success': True, 'username': None})
+            try:
+                cursor.execute(
+                    '''INSERT INTO user_profiles (user_id, username, updated_at)
+                       VALUES (%s::uuid, %s, now())
+                       ON CONFLICT (user_id) DO UPDATE
+                       SET username = EXCLUDED.username, updated_at = now()''',
+                    (user_id, username),
+                )
+            except psycopg2.errors.UniqueViolation:
+                return jsonify({'success': False, 'error': 'Username này đã có người dùng, vui lòng chọn tên khác.'}), 409
         return jsonify({'success': True, 'username': username})
     except HTTPException:
         raise
@@ -589,16 +673,22 @@ def login_alias():
         email = identifier
         if '@' not in identifier:
             conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                '''SELECT u.email FROM user_profiles p
-                   JOIN auth.users u ON u.id = p.user_id
-                   WHERE p.username = %s''',
-                (identifier.lower(),),
-            )
-            row = cursor.fetchone()
-            cursor.close()
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    '''SELECT u.email FROM user_profiles p
+                       JOIN auth.users u ON u.id = p.user_id
+                       WHERE p.username = %s''',
+                    (identifier.lower(),),
+                )
+                row = cursor.fetchone()
             if not row or not row[0]:
+                # Làm phẳng timing: nhánh "username không tồn tại" cũng tốn một
+                # round-trip GoTrue như nhánh "sai mật khẩu" — không dò được
+                # username tồn tại hay không qua thời gian phản hồi.
+                try:
+                    _gotrue_password_grant('timing-pad@example.invalid', password)
+                except Exception:
+                    pass
                 return jsonify({'success': False, 'error': 'Sai tên đăng nhập hoặc mật khẩu.'}), 401
             email = row[0]
 
@@ -616,66 +706,50 @@ def login_alias():
 @limiter.limit('120 per minute')
 def get_event(event_code):
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            '''SELECT id, event_code, title, owner_id, share_access, share_role,
-                      created_at, updated_at
-               FROM events WHERE event_code = %s''',
-            (event_code,),
-        )
-        event = cursor.fetchone()
-        if not event:
-            cursor.close()
-            return jsonify({'success': False, 'error': 'Event not found'}), 404
-
         user_id = request_user_id(request)
-        ownerless = event['owner_id'] is None
-        is_owner = bool(event['owner_id'] and user_id and str(event['owner_id']) == user_id)
-        collab_role = _collaborator_role(cursor, event['id'], user_id)
+        conn = get_db_connection()
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+            acc = _event_access(cursor, event_code, user_id)
+            if acc is None:
+                return jsonify({'success': False, 'error': 'Event not found'}), 404
 
-        # Chế độ "Hạn chế": owner / người được mời đích danh. Event không chủ
-        # thì luôn xem được (không có owner để giới hạn về).
-        if (event['share_access'] == 'restricted' and not ownerless
-                and not (is_owner or collab_role)):
-            cursor.close()
-            return jsonify({
-                'success': False,
-                'error': 'Sự kiện đang ở chế độ hạn chế — chỉ chủ sở hữu mới truy cập được.',
-            }), 403
+            # Chế độ "Hạn chế": owner / người được mời đích danh. Event không
+            # chủ thì luôn xem được (không có owner để giới hạn về).
+            if not acc.may_view:
+                return jsonify({
+                    'success': False,
+                    'error': 'Sự kiện đang ở chế độ hạn chế — chỉ chủ sở hữu mới truy cập được.',
+                }), 403
 
-        doc = load_event_children(cursor, event['id'])
-        cursor.close()
+            doc = load_event_children(cursor, acc.event_id)
 
-        # Quyền sửa: owner / event không chủ / chia sẻ "ai có link đều chỉnh
-        # sửa" / được mời vai trò editor. Mọi thao tác ghi yêu cầu đăng nhập →
-        # can_edit ("PUT của bạn sẽ thành công") chỉ true khi CÓ QUYỀN và ĐÃ
-        # đăng nhập; có quyền mà chưa đăng nhập → cờ riêng để UI hiện
-        # "Đăng nhập để chỉnh sửa".
-        link_editor = event['share_access'] == 'link' and event['share_role'] == 'editor'
-        has_permission = is_owner or ownerless or link_editor or collab_role == 'editor'
-        can_edit = has_permission and bool(user_id)
-        login_required_to_edit = has_permission and not user_id
+        # Mọi thao tác ghi yêu cầu đăng nhập → can_edit ("PUT của bạn sẽ thành
+        # công") chỉ true khi CÓ QUYỀN và ĐÃ đăng nhập; có quyền mà chưa đăng
+        # nhập → cờ riêng để UI hiện "Đăng nhập để chỉnh sửa".
+        can_edit = acc.may_edit and bool(user_id)
+        login_required_to_edit = acc.may_edit and not user_id
         return jsonify({
             'success': True,
             'event': {
-                'id': str(event['id']),
-                'event_code': event['event_code'],
-                'title': event['title'],
+                'id': str(acc.event_id),
+                'event_code': event_code,
+                'title': acc.title,
                 'can_edit': can_edit,
-                'is_owner': is_owner,
+                'is_owner': acc.is_owner,
                 'login_required_to_edit': login_required_to_edit,
-                'share_access': event['share_access'],
-                'share_role': event['share_role'],
+                'share_access': acc.share_access,
+                'share_role': acc.share_role,
                 'members': doc['members'],
                 'expenses': doc['expenses'],
                 'bankInfo': doc['bankInfo'],
                 'couples': doc['couples'],
                 'rates': doc['rates'],
-                'created_at': event['created_at'].isoformat() if event['created_at'] else None,
-                'updated_at': event['updated_at'].isoformat() if event['updated_at'] else None,
+                'created_at': acc.created_at.isoformat() if acc.created_at else None,
+                'updated_at': acc.updated_at.isoformat() if acc.updated_at else None,
             },
         })
+    except HTTPException:
+        raise
     except Exception as e:
         return _server_error(e)
 
@@ -700,49 +774,45 @@ def update_event(event_code):
         expected_updated_at = raw.get('expectedUpdatedAt') if isinstance(raw, dict) else None
 
         conn = get_db_connection()
-        cursor = conn.cursor()
+        # Toàn bộ check quyền + so updated_at phải nằm TRONG transaction với
+        # FOR UPDATE trên dòng event: hai PUT đồng thời sẽ xếp hàng, cái sau
+        # nhìn thấy updated_at mới của cái trước → 409 thay vì ghi đè âm thầm
+        # / vỡ UNIQUE khi hai replace_event_children đan xen.
+        with transaction(conn) as cursor:
+            acc = _event_access(cursor, event_code, (claims or {}).get('sub'),
+                                for_update=True)
+            if acc is None:
+                return jsonify({'success': False, 'error': 'Event not found'}), 404
+            if not acc.may_edit:
+                return jsonify({'success': False, 'error': 'Bạn không có quyền chỉnh sửa sự kiện này.'}), 403
+            if (expected_updated_at and acc.updated_at
+                    and acc.updated_at.isoformat() != expected_updated_at):
+                return jsonify({
+                    'success': False,
+                    'conflict': True,
+                    'error': 'Sự kiện đã được cập nhật ở nơi khác.',
+                }), 409
 
-        permission, event_id, current_updated_at = _check_edit_permission(cursor, event_code)
-        if permission == 'not_found':
-            cursor.close()
-            return jsonify({'success': False, 'error': 'Event not found'}), 404
-        if permission == 'forbidden':
-            cursor.close()
-            return jsonify({'success': False, 'error': 'Bạn không có quyền chỉnh sửa sự kiện này.'}), 403
-
-        if (expected_updated_at and current_updated_at
-                and current_updated_at.isoformat() != expected_updated_at):
-            cursor.close()
-            return jsonify({
-                'success': False,
-                'conflict': True,
-                'error': 'Sự kiện đã được cập nhật ở nơi khác.',
-            }), 409
-
-        try:
-            cursor.execute('BEGIN')
             # Bản cũ phải đọc TRONG transaction, trước khi ghi đè — để diff cho lịch sử
-            old_doc = _load_full_document(conn, cursor, event_id)
+            old_doc = _load_full_document(conn, cursor, acc.event_id)
+            if old_doc == data:
+                # No-op thật sự (document sau validate giống hệt bản đã lưu):
+                # không ghi gì, KHÔNG bump updated_at — bump vô cớ khiến tab
+                # khác đang mở bị 409 oan ở lần lưu kế tiếp.
+                return jsonify({
+                    'success': True,
+                    'updated_at': acc.updated_at.isoformat() if acc.updated_at else None,
+                })
             cursor.execute(
                 'UPDATE events SET title = %s, updated_at = now() WHERE id = %s RETURNING updated_at',
-                (data['title'], event_id),
+                (data['title'], acc.event_id),
             )
             new_row = cursor.fetchone()
-            replace_event_children(cursor, event_id, data)
+            replace_event_children(cursor, acc.event_id, data)
             summary = diff_documents(old_doc, data)
-            if summary:  # lưu không đổi gì (no-op) → không ghi dòng lịch sử
+            if summary:  # thay đổi diff không thấy (vd đổi thứ tự) → vẫn lưu, không ghi lịch sử
                 actor_id, actor_name = _actor_info(cursor, claims)
-                record_revision(cursor, event_id, actor_id, actor_name, 'edit', summary, data)
-            cursor.execute('COMMIT')
-        except Exception:
-            try:
-                cursor.execute('ROLLBACK')
-            except Exception:
-                # ROLLBACK có thể fail nếu connection đã chết — không che lỗi gốc
-                pass
-            raise
-        finally:
-            cursor.close()
+                record_revision(cursor, acc.event_id, actor_id, actor_name, 'edit', summary, data)
         new_updated_at = new_row[0].isoformat() if new_row and new_row[0] else None
         return jsonify({'success': True, 'updated_at': new_updated_at})
     except HTTPException:
@@ -868,10 +938,13 @@ def _fetch_erapi_rates(_date_str):
 @limiter.limit('30 per minute; 500 per day')
 def get_exchange_rates():
     date_str = request.args.get('date') or datetime.now().strftime('%Y-%m-%d')
+    # date đi thẳng vào URL upstream (tag jsdelivr / query VCB) — chặn mọi thứ
+    # không phải đúng dạng YYYY-MM-DD để không tiêm được path/param lạ.
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_str):
+        return jsonify({'success': False, 'error': 'Tham số date không hợp lệ (YYYY-MM-DD).'}), 400
     rate_type = (request.args.get('type') or 'mid').lower()
 
     if rate_type == 'mid':
-        errors = []
         for fetch, name in (
             (_fetch_fawaz_rates, 'fawazahmed0'),
             (_fetch_erapi_rates, 'exchangerate-api'),
@@ -880,14 +953,16 @@ def get_exchange_rates():
                 data = fetch(date_str)
                 return jsonify({'success': True, 'source': name, 'rateType': 'mid', **data})
             except Exception as e:
-                errors.append(f'{name}: {e}')
+                # Chi tiết lỗi (URL, message thư viện) chỉ ghi log — không trả client
+                app.logger.warning('exchange-rates %s lỗi: %s', name, e)
         try:
             vcb = _fetch_vietcombank_rates(date_str)
             data = _vcb_with_rate(vcb, 'mid')
             return jsonify({'success': True, 'source': 'vietcombank-mid', 'rateType': 'mid', **data})
         except Exception as e:
-            errors.append(f'vietcombank: {e}')
-        return jsonify({'success': False, 'error': 'Tất cả nguồn đều lỗi — ' + ' | '.join(errors)}), 502
+            app.logger.warning('exchange-rates vietcombank lỗi: %s', e)
+        return jsonify({'success': False,
+                        'error': 'Không lấy được tỷ giá từ các nguồn, vui lòng thử lại sau.'}), 502
 
     if rate_type not in ('transfer', 'cash', 'sell'):
         rate_type = 'transfer'
@@ -896,7 +971,9 @@ def get_exchange_rates():
         data = _vcb_with_rate(vcb, rate_type)
         return jsonify({'success': True, 'source': 'vietcombank', 'rateType': rate_type, **data})
     except (HTTPError, URLError) as e:
-        return jsonify({'success': False, 'error': f'Không kết nối được Vietcombank: {e}'}), 502
+        app.logger.warning('exchange-rates vietcombank lỗi: %s', e)
+        return jsonify({'success': False,
+                        'error': 'Không kết nối được Vietcombank, vui lòng thử lại sau.'}), 502
     except Exception as e:
         return _server_error(e)
 
@@ -948,49 +1025,38 @@ def update_sharing(event_code):
             return jsonify({'success': False, 'error': 'Cài đặt chia sẻ không hợp lệ.'}), 400
 
         conn = get_db_connection()
-        cursor = conn.cursor()
-        permission, event_id, _unused = _check_edit_permission(cursor, event_code)
-        if permission == 'not_found':
-            cursor.close()
-            return jsonify({'success': False, 'error': 'Event not found'}), 404
-        if permission == 'forbidden':
-            cursor.close()
-            return jsonify({'success': False, 'error': 'Bạn không có quyền thay đổi chia sẻ của sự kiện này.'}), 403
+        with transaction(conn) as cursor:
+            acc = _event_access(cursor, event_code, (claims or {}).get('sub'),
+                                for_update=True)
+            if acc is None:
+                return jsonify({'success': False, 'error': 'Event not found'}), 404
+            if not acc.may_edit:
+                return jsonify({'success': False, 'error': 'Bạn không có quyền thay đổi chia sẻ của sự kiện này.'}), 403
 
-        # Event không có chủ mà đặt 'restricted' thì không còn ai xem được → chặn
-        if access == 'restricted':
-            cursor.execute('SELECT owner_id FROM events WHERE id = %s', (event_id,))
-            if cursor.fetchone()[0] is None:
-                cursor.close()
+            # Event không có chủ mà đặt 'restricted' thì không còn ai xem được → chặn
+            if access == 'restricted' and acc.ownerless:
                 return jsonify({
                     'success': False,
                     'error': 'Sự kiện chưa có chủ sở hữu — không đặt được chế độ hạn chế.',
                 }), 400
 
-        try:
-            cursor.execute('BEGIN')
+            if acc.share_access == access and acc.share_role == role:
+                # No-op: đặt lại đúng cài đặt hiện tại — không ghi dòng lịch sử
+                # (mỗi dòng 'share' kèm cả snapshot, spam sẽ đẩy lùi lịch sử thật)
+                return jsonify({'success': True, 'share_access': access, 'share_role': role})
+
             cursor.execute(
                 'UPDATE events SET share_access = %s, share_role = %s WHERE id = %s',
-                (access, role, event_id),
+                (access, role, acc.event_id),
             )
             # Đổi chia sẻ cũng là hành động cần trace — snapshot là document
             # hiện tại (nội dung không đổi, restore về dòng này vẫn đúng nghĩa)
-            snapshot = _load_full_document(conn, cursor, event_id)
+            snapshot = _load_full_document(conn, cursor, acc.event_id)
             actor_id, actor_name = _actor_info(cursor, claims)
-            record_revision(cursor, event_id, actor_id, actor_name, 'share',
+            record_revision(cursor, acc.event_id, actor_id, actor_name, 'share',
                             [{'a': 'update', 'o': 'sharing',
                               't': f'Đổi quyền truy cập: {_SHARE_LABEL[(access, role)]}'}],
                             snapshot)
-            cursor.execute('COMMIT')
-        except Exception:
-            try:
-                cursor.execute('ROLLBACK')
-            except Exception:
-                # ROLLBACK có thể fail nếu connection đã chết — không che lỗi gốc
-                pass
-            raise
-        finally:
-            cursor.close()
         return jsonify({'success': True, 'share_access': access, 'share_role': role})
     except HTTPException:
         raise
@@ -1009,17 +1075,22 @@ def list_event_revisions(event_code):
             return jsonify({'success': False, 'error': 'Vui lòng đăng nhập để xem lịch sử.'}), 401
 
         conn = get_db_connection()
-        cursor = conn.cursor()
-        permission, event_id, _unused = _check_edit_permission(cursor, event_code)
-        cursor.close()
-        if permission == 'not_found':
+        with conn.cursor() as cursor:
+            acc = _event_access(cursor, event_code, (claims or {}).get('sub'))
+        if acc is None:
             return jsonify({'success': False, 'error': 'Event not found'}), 404
-        if permission == 'forbidden':
+        if not acc.may_edit:
             return jsonify({'success': False, 'error': 'Bạn không có quyền xem lịch sử sự kiện này.'}), 403
 
-        dict_cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        revisions = list_revisions(dict_cur, event_id)
-        dict_cur.close()
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as dict_cur:
+            revisions = list_revisions(dict_cur, event_id=acc.event_id)
+        # Event chia sẻ 'link'+'editor' thì BẤT KỲ ai đăng nhập có link đều xem
+        # được lịch sử → che email của những người từng sửa (actor_name fallback
+        # về email khi họ chưa đặt username). Owner xem danh sách người được
+        # mời đầy đủ ở /collaborators, không cần email ở đây.
+        if not acc.is_owner:
+            for rev in revisions:
+                rev['actor_name'] = _mask_email(rev.get('actor_name'))
         return jsonify({'success': True, 'revisions': revisions})
     except HTTPException:
         raise
@@ -1048,62 +1119,47 @@ def restore_event(event_code):
         expected_updated_at = body.get('expectedUpdatedAt')
 
         conn = get_db_connection()
-        cursor = conn.cursor()
-        permission, event_id, current_updated_at = _check_edit_permission(cursor, event_code)
-        if permission == 'not_found':
-            cursor.close()
-            return jsonify({'success': False, 'error': 'Event not found'}), 404
-        if permission == 'forbidden':
-            cursor.close()
-            return jsonify({'success': False, 'error': 'Bạn không có quyền chỉnh sửa sự kiện này.'}), 403
+        # FOR UPDATE như PUT — check updated_at và ghi đè phải nhìn cùng một bản
+        with transaction(conn) as cursor:
+            acc = _event_access(cursor, event_code, (claims or {}).get('sub'),
+                                for_update=True)
+            if acc is None:
+                return jsonify({'success': False, 'error': 'Event not found'}), 404
+            if not acc.may_edit:
+                return jsonify({'success': False, 'error': 'Bạn không có quyền chỉnh sửa sự kiện này.'}), 403
 
-        # Optimistic locking như PUT — không ghi đè âm thầm bản ai đó vừa lưu
-        # trong lúc người này mở lịch sử
-        if (expected_updated_at and current_updated_at
-                and current_updated_at.isoformat() != expected_updated_at):
-            cursor.close()
-            return jsonify({
-                'success': False,
-                'conflict': True,
-                'error': 'Sự kiện đã được cập nhật ở nơi khác.',
-            }), 409
+            # Optimistic locking như PUT — không ghi đè âm thầm bản ai đó vừa
+            # lưu trong lúc người này mở lịch sử
+            if (expected_updated_at and acc.updated_at
+                    and acc.updated_at.isoformat() != expected_updated_at):
+                return jsonify({
+                    'success': False,
+                    'conflict': True,
+                    'error': 'Sự kiện đã được cập nhật ở nơi khác.',
+                }), 409
 
-        snapshot, rev_created_at = get_revision(cursor, event_id, str(revision_id))
-        if snapshot is None:
-            cursor.close()
-            return jsonify({'success': False, 'error': 'Không tìm thấy phiên bản.'}), 404
-        try:
-            # Snapshot cũ phải qua validation hiện hành — dữ liệu từng hợp lệ
-            # có thể không còn (đổi rule) → chặn thay vì ghi bừa
-            data = validate_event_payload(snapshot)
-        except ValidationError:
-            cursor.close()
-            return jsonify({'success': False, 'error': 'Phiên bản này không còn khôi phục được.'}), 400
+            snapshot, rev_created_at = get_revision(cursor, acc.event_id, str(revision_id))
+            if snapshot is None:
+                return jsonify({'success': False, 'error': 'Không tìm thấy phiên bản.'}), 404
+            try:
+                # Snapshot cũ phải qua validation hiện hành — dữ liệu từng hợp lệ
+                # có thể không còn (đổi rule) → chặn thay vì ghi bừa
+                data = validate_event_payload(snapshot)
+            except ValidationError:
+                return jsonify({'success': False, 'error': 'Phiên bản này không còn khôi phục được.'}), 400
 
-        # Giờ VN (UTC+7, không DST) cho text lịch sử
-        vn_time = (rev_created_at + timedelta(hours=7)).strftime('%H:%M %d/%m/%Y')
-        try:
-            cursor.execute('BEGIN')
+            # Giờ VN (UTC+7, không DST) cho text lịch sử
+            vn_time = (rev_created_at + timedelta(hours=7)).strftime('%H:%M %d/%m/%Y')
             cursor.execute(
                 'UPDATE events SET title = %s, updated_at = now() WHERE id = %s RETURNING updated_at',
-                (data['title'], event_id),
+                (data['title'], acc.event_id),
             )
             new_row = cursor.fetchone()
-            replace_event_children(cursor, event_id, data)
+            replace_event_children(cursor, acc.event_id, data)
             actor_id, actor_name = _actor_info(cursor, claims)
-            record_revision(cursor, event_id, actor_id, actor_name, 'restore',
+            record_revision(cursor, acc.event_id, actor_id, actor_name, 'restore',
                             [{'a': 'update', 'o': 'restore',
                               't': f'Khôi phục về phiên bản lúc {vn_time}'}], data)
-            cursor.execute('COMMIT')
-        except Exception:
-            try:
-                cursor.execute('ROLLBACK')
-            except Exception:
-                # ROLLBACK có thể fail nếu connection đã chết — không che lỗi gốc
-                pass
-            raise
-        finally:
-            cursor.close()
         new_updated_at = new_row[0].isoformat() if new_row and new_row[0] else None
         return jsonify({'success': True, 'updated_at': new_updated_at})
     except HTTPException:
@@ -1122,29 +1178,26 @@ def list_collaborators(event_code):
             return jsonify({'success': False, 'error': 'Vui lòng đăng nhập.'}), 401
 
         conn = get_db_connection()
-        cursor = conn.cursor()
-        status, event_id, _owner_id = _require_owner(cursor, event_code, claims)
-        if status == 'not_found':
-            cursor.close()
-            return jsonify({'success': False, 'error': 'Event not found'}), 404
-        if status == 'forbidden':
-            cursor.close()
-            return jsonify({'success': False,
-                            'error': 'Chỉ chủ sở hữu mới quản lý được người có quyền truy cập.'}), 403
+        with conn.cursor() as cursor:
+            acc = _event_access(cursor, event_code, (claims or {}).get('sub'))
+            if acc is None:
+                return jsonify({'success': False, 'error': 'Event not found'}), 404
+            if not acc.is_owner:
+                return jsonify({'success': False,
+                                'error': 'Chỉ chủ sở hữu mới quản lý được người có quyền truy cập.'}), 403
 
-        cursor.execute(
-            '''SELECT c.user_id, c.role, p.username, u.email
-               FROM event_collaborators c
-               LEFT JOIN user_profiles p ON p.user_id = c.user_id
-               LEFT JOIN auth.users u ON u.id = c.user_id
-               WHERE c.event_id = %s ORDER BY c.created_at''',
-            (event_id,),
-        )
-        collaborators = [
-            {'user_id': str(r[0]), 'display': r[2] or r[3] or '', 'role': r[1]}
-            for r in cursor.fetchall()
-        ]
-        cursor.close()
+            cursor.execute(
+                '''SELECT c.user_id, c.role, p.username, u.email
+                   FROM event_collaborators c
+                   LEFT JOIN user_profiles p ON p.user_id = c.user_id
+                   LEFT JOIN auth.users u ON u.id = c.user_id
+                   WHERE c.event_id = %s ORDER BY c.created_at''',
+                (acc.event_id,),
+            )
+            collaborators = [
+                {'user_id': str(r[0]), 'display': r[2] or r[3] or '', 'role': r[1]}
+                for r in cursor.fetchall()
+            ]
         return jsonify({'success': True, 'collaborators': collaborators})
     except HTTPException:
         raise
@@ -1173,71 +1226,57 @@ def add_collaborator(event_code):
         identifier = identifier.strip()
 
         conn = get_db_connection()
-        cursor = conn.cursor()
-        status, event_id, owner_id = _require_owner(cursor, event_code, claims)
-        if status == 'not_found':
-            cursor.close()
-            return jsonify({'success': False, 'error': 'Event not found'}), 404
-        if status == 'forbidden':
-            cursor.close()
-            return jsonify({'success': False,
-                            'error': 'Chỉ chủ sở hữu mới quản lý được người có quyền truy cập.'}), 403
-
-        target_id, target_email = _resolve_identifier(cursor, identifier)
-        if not target_id:
-            cursor.close()
-            return jsonify({'success': False,
-                            'error': 'Không tìm thấy tài khoản với email/username này.'}), 404
-        if str(owner_id) == target_id:
-            cursor.close()
-            return jsonify({'success': False, 'error': 'Chủ sở hữu đã có toàn quyền.'}), 400
-
-        cursor.execute(
-            'SELECT role FROM event_collaborators WHERE event_id = %s AND user_id = %s::uuid',
-            (event_id, target_id),
-        )
-        existing = cursor.fetchone()
-        display = _collaborator_display(cursor, target_id, target_email)
-
-        if existing and existing[0] == role:
-            # No-op: đã có đúng vai trò này — không ghi lịch sử
-            cursor.close()
-            return jsonify({'success': True,
-                            'collaborator': {'user_id': target_id, 'display': display, 'role': role}})
-
-        if not existing:
-            cursor.execute('SELECT count(*) FROM event_collaborators WHERE event_id = %s', (event_id,))
-            if cursor.fetchone()[0] >= _MAX_COLLABORATORS:
-                cursor.close()
+        with transaction(conn) as cursor:
+            acc = _event_access(cursor, event_code, (claims or {}).get('sub'),
+                                for_update=True)
+            if acc is None:
+                return jsonify({'success': False, 'error': 'Event not found'}), 404
+            if not acc.is_owner:
                 return jsonify({'success': False,
-                                'error': f'Tối đa {_MAX_COLLABORATORS} người mỗi sự kiện.'}), 400
+                                'error': 'Chỉ chủ sở hữu mới quản lý được người có quyền truy cập.'}), 403
 
-        role_label = _COLLAB_ROLE_LABEL[role]
-        text = (f"Đổi vai trò của '{display}' thành {role_label}" if existing
-                else f"Thêm quyền truy cập cho '{display}' ({role_label})")
-        try:
-            cursor.execute('BEGIN')
+            target_id, target_email = _resolve_identifier(cursor, identifier)
+            if not target_id:
+                return jsonify({'success': False,
+                                'error': 'Không tìm thấy tài khoản với email/username này.'}), 404
+            if str(acc.owner_id) == target_id:
+                return jsonify({'success': False, 'error': 'Chủ sở hữu đã có toàn quyền.'}), 400
+
+            cursor.execute(
+                'SELECT role FROM event_collaborators WHERE event_id = %s AND user_id = %s::uuid',
+                (acc.event_id, target_id),
+            )
+            existing = cursor.fetchone()
+            display = _collaborator_display(cursor, target_id, target_email)
+
+            if existing and existing[0] == role:
+                # No-op: đã có đúng vai trò này — không ghi lịch sử
+                return jsonify({'success': True,
+                                'collaborator': {'user_id': target_id, 'display': display, 'role': role}})
+
+            if not existing:
+                cursor.execute('SELECT count(*) FROM event_collaborators WHERE event_id = %s',
+                               (acc.event_id,))
+                if cursor.fetchone()[0] >= _MAX_COLLABORATORS:
+                    return jsonify({'success': False,
+                                    'error': f'Tối đa {_MAX_COLLABORATORS} người mỗi sự kiện.'}), 400
+
+            # Text lịch sử che email: người xem lịch sử có thể không phải owner
+            role_label = _COLLAB_ROLE_LABEL[role]
+            masked = _mask_email(display)
+            text = (f"Đổi vai trò của '{masked}' thành {role_label}" if existing
+                    else f"Thêm quyền truy cập cho '{masked}' ({role_label})")
             cursor.execute(
                 '''INSERT INTO event_collaborators (event_id, user_id, role, added_by)
                    VALUES (%s, %s::uuid, %s, %s::uuid)
                    ON CONFLICT (event_id, user_id) DO UPDATE SET role = EXCLUDED.role''',
-                (event_id, target_id, role, claims['sub']),
+                (acc.event_id, target_id, role, claims['sub']),
             )
             # Không bump updated_at (như /sharing); ghi lịch sử trong cùng transaction
-            snapshot = _load_full_document(conn, cursor, event_id)
+            snapshot = _load_full_document(conn, cursor, acc.event_id)
             actor_id, actor_name = _actor_info(cursor, claims)
-            record_revision(cursor, event_id, actor_id, actor_name, 'share',
+            record_revision(cursor, acc.event_id, actor_id, actor_name, 'share',
                             [{'a': 'update', 'o': f'collab:{target_id}', 't': text}], snapshot)
-            cursor.execute('COMMIT')
-        except Exception:
-            try:
-                cursor.execute('ROLLBACK')
-            except Exception:
-                # ROLLBACK có thể fail nếu connection đã chết — không che lỗi gốc
-                pass
-            raise
-        finally:
-            cursor.close()
         return jsonify({'success': True,
                         'collaborator': {'user_id': target_id, 'display': display, 'role': role}})
     except HTTPException:
@@ -1261,44 +1300,30 @@ def remove_collaborator(event_code, user_id):
                             'error': 'Không tìm thấy người này trong danh sách.'}), 404
 
         conn = get_db_connection()
-        cursor = conn.cursor()
-        status, event_id, _owner_id = _require_owner(cursor, event_code, claims)
-        if status == 'not_found':
-            cursor.close()
-            return jsonify({'success': False, 'error': 'Event not found'}), 404
-        if status == 'forbidden':
-            cursor.close()
-            return jsonify({'success': False,
-                            'error': 'Chỉ chủ sở hữu mới quản lý được người có quyền truy cập.'}), 403
+        with transaction(conn) as cursor:
+            acc = _event_access(cursor, event_code, (claims or {}).get('sub'),
+                                for_update=True)
+            if acc is None:
+                return jsonify({'success': False, 'error': 'Event not found'}), 404
+            if not acc.is_owner:
+                return jsonify({'success': False,
+                                'error': 'Chỉ chủ sở hữu mới quản lý được người có quyền truy cập.'}), 403
 
-        display = _collaborator_display(cursor, user_id)
-        try:
-            cursor.execute('BEGIN')
+            display = _collaborator_display(cursor, user_id)
             cursor.execute(
                 '''DELETE FROM event_collaborators
                    WHERE event_id = %s AND user_id = %s::uuid RETURNING role''',
-                (event_id, user_id),
+                (acc.event_id, user_id),
             )
             if cursor.fetchone() is None:
-                cursor.execute('ROLLBACK')
-                cursor.close()
+                # Chưa ghi gì — return luôn (COMMIT rỗng vô hại)
                 return jsonify({'success': False,
                                 'error': 'Không tìm thấy người này trong danh sách.'}), 404
-            snapshot = _load_full_document(conn, cursor, event_id)
+            snapshot = _load_full_document(conn, cursor, acc.event_id)
             actor_id, actor_name = _actor_info(cursor, claims)
-            record_revision(cursor, event_id, actor_id, actor_name, 'share',
+            record_revision(cursor, acc.event_id, actor_id, actor_name, 'share',
                             [{'a': 'remove', 'o': f'collab:{user_id}',
-                              't': f"Xóa quyền truy cập của '{display}'"}], snapshot)
-            cursor.execute('COMMIT')
-        except Exception:
-            try:
-                cursor.execute('ROLLBACK')
-            except Exception:
-                # ROLLBACK có thể fail nếu connection đã chết — không che lỗi gốc
-                pass
-            raise
-        finally:
-            cursor.close()
+                              't': f"Xóa quyền truy cập của '{_mask_email(display)}'"}], snapshot)
         return jsonify({'success': True})
     except HTTPException:
         raise
@@ -1316,24 +1341,36 @@ def delete_event(event_code):
         if not (claims or {}).get('sub'):
             return jsonify({'success': False, 'error': 'Vui lòng đăng nhập để chỉnh sửa.'}), 401
 
+        user_id = (claims or {}).get('sub')
         conn = get_db_connection()
-        cursor = conn.cursor()
+        with transaction(conn) as cursor:
+            # Xóa event: chỉ owner (event không chủ: ai đăng nhập cũng xóa
+            # được, giữ hành vi legacy) — vai trò "Người chỉnh sửa" qua
+            # link/được mời không được xóa (giống Google Docs).
+            acc = _event_access(cursor, event_code, user_id, for_update=True)
+            if acc is None:
+                return jsonify({'success': False, 'error': 'Event not found'}), 404
+            if not acc.may_delete:
+                return jsonify({'success': False, 'error': 'Bạn không có quyền xóa sự kiện này.'}), 403
 
-        # Xóa event: chỉ owner (event không chủ: ai đăng nhập cũng xóa được,
-        # giữ hành vi legacy) — vai trò "Người chỉnh sửa" qua link/được mời
-        # không được xóa (giống Google Docs).
-        permission, _event_id, _unused = _check_edit_permission(
-            cursor, event_code, allow_link_editor=False)
-        if permission == 'not_found':
-            cursor.close()
-            return jsonify({'success': False, 'error': 'Event not found'}), 404
-        if permission == 'forbidden':
-            cursor.close()
-            return jsonify({'success': False, 'error': 'Bạn không có quyền xóa sự kiện này.'}), 403
-
-        cursor.execute('DELETE FROM events WHERE event_code = %s', (event_code,))
-        cursor.close()
+            # DELETE là xóa cứng và cascade cả event_revisions — chụp document
+            # vào deleted_events (thùng rác 90 ngày) TRONG cùng transaction để
+            # còn cứu được dữ liệu lỡ tay (khôi phục thủ công bằng SQL).
+            doc = _load_full_document(conn, cursor, acc.event_id)
+            cursor.execute(
+                '''INSERT INTO deleted_events
+                       (event_id, event_code, title, owner_id, deleted_by, document)
+                   VALUES (%s, %s, %s, %s, %s::uuid, %s)''',
+                (acc.event_id, event_code, doc.get('title', ''), acc.owner_id,
+                 user_id, json.dumps(doc)),
+            )
+            # Dọn dần tombstone quá hạn — rẻ, chạy nhân tiện mỗi lần xóa
+            cursor.execute(
+                "DELETE FROM deleted_events WHERE deleted_at < now() - interval '90 days'")
+            cursor.execute('DELETE FROM events WHERE id = %s', (acc.event_id,))
         return jsonify({'success': True})
+    except HTTPException:
+        raise
     except Exception as e:
         return _server_error(e)
 

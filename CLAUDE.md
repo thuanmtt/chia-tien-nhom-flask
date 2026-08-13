@@ -29,6 +29,12 @@ node test_split.js
 python3 test_event_store.py   # unit test decompose/compose (không cần DB)
 python3 test_supabase_auth.py   # unit test verify JWT (không cần DB/mạng)
 python3 test_revision_diff.py   # unit test diff lịch sử chỉnh sửa (không cần DB)
+python3 test_validation.py    # unit test validate_event_payload (không cần DB)
+
+# CI (.github/workflows/ci.yml): chạy 4 unit test Python + test_split.js +
+# node --check + import vercel_app + diff 2 file requirements trên mỗi push/PR.
+# test_api.py KHÔNG chạy trong CI (cần server + secrets) — chạy tay trước deploy;
+# exit code khác 0 khi fail nên dùng được trong chuỗi &&.
 
 # Syntax-check the frontend
 node --check static/app.js && node --check static/split.js && node --check static/sw.js && node --check static/auth.js
@@ -62,15 +68,31 @@ Lịch sử chỉnh sửa: bảng `event_revisions` (actor, kind create/edit/res
 diff tiếng Việt từ `revision_diff.py`, snapshot JSONB cả document SAU hành động) — ghi trong
 CÙNG transaction với save qua `revision_store.py` (squash chuỗi update cùng đối tượng cùng
 actor trong 10 phút; giữ 200 bản/event). `GET /api/events/<code>/revisions` (quyền sửa) xem
-lịch sử; `POST /api/events/<code>/restore` khôi phục snapshot (validate lại, log dòng
-'restore', optimistic locking 409). Xóa event vẫn là DELETE cứng — revisions mất theo.
+lịch sử — `actor_name` là email thì bị MASK (`t***@domain`) với người xem không phải owner;
+text revision 'share' về collaborator cũng ghi display đã mask. `POST
+/api/events/<code>/restore` khôi phục snapshot (validate lại, log dòng 'restore',
+optimistic locking 409). Xóa event vẫn là DELETE cứng — revisions mất theo — nhưng NGAY
+trước khi xóa, cả document được chụp vào bảng `deleted_events` (tombstone, dọn dần sau
+90 ngày, khôi phục thủ công bằng SQL; chưa có UI).
 
-**Auth model** — tài khoản Supabase bắt buộc cho MỌI thao tác ghi (xem bullet bên dưới); cơ chế `edit_key`/`X-Edit-Key` đã BỎ HOÀN TOÀN (không còn `hmac` trong `vercel_app.py`) — quyền trên từng event do `_check_edit_permission` xét theo:
+Ghi DB: mọi đường ghi dùng contextmanager `transaction(conn)` (BEGIN/COMMIT/ROLLBACK +
+đóng cursor; `return` trong khối with vẫn COMMIT). Quyền đọc từ MỘT resolver
+`_event_access(cursor, event_code, user_id, for_update=False)` → namedtuple
+`EventAccess` (may_view/may_edit/may_delete/is_owner/ownerless/collab_role/share_*/
+updated_at/title) — route ghi truyền `for_update=True` để khóa dòng event (FOR UPDATE)
+TRONG transaction: check `expectedUpdatedAt` và ghi đè nhìn cùng một bản, hai PUT đồng
+thời xếp hàng → cái sau 409 thay vì lost-update. PUT với document giống hệt bản đã lưu
+(old_doc == data) là no-op: không ghi gì, KHÔNG bump updated_at (tránh 409 oan cho tab
+khác); PUT /sharing đặt lại đúng giá trị hiện tại cũng no-op (không spam revision).
+Hai query danh sách (my_events, load_events_summary) lặp lại rule may_view bằng SQL —
+đổi rule trong `_event_access` phải đổi cả hai chỗ đó.
+
+**Auth model** — tài khoản Supabase bắt buộc cho MỌI thao tác ghi (xem bullet bên dưới); cơ chế `edit_key`/`X-Edit-Key` đã BỎ HOÀN TOÀN (không còn `hmac` trong `vercel_app.py`) — quyền trên từng event do resolver `_event_access` xét theo:
 - `event_code` — public identifier, appears in share links.
 - Owner (`owner_id`, so khớp `sub` trong JWT) — toàn quyền: GET/PUT/DELETE/sharing/collaborators.
 - `event_collaborators` vai trò `editor` — sửa nội dung + đổi `/sharing`, KHÔNG xóa.
 - `share_access='link'` + `share_role='editor'` — ai có link đều PUT được, KHÔNG xóa
-  (DELETE luôn gọi `_check_edit_permission(..., allow_link_editor=False)`).
+  (DELETE xét `may_delete` — chỉ owner hoặc event không chủ).
 - Event KHÔNG có chủ (`owner_id IS NULL` — event legacy/migrate từ trước khi có đăng
   nhập): mặc định ai đăng nhập cũng sửa VÀ xóa được, và luôn xem được bất kể
   `share_access` (không có ai để giới hạn về). `PUT /sharing` từ chối đặt `restricted`
@@ -102,11 +124,13 @@ lịch sử; `POST /api/events/<code>/restore` khôi phục snapshot (validate l
      `is_owner` — frontend chỉ hiện UI quản lý người cho owner. Thêm/đổi/gỡ đều ghi
      revision kind 'share'.
 
-**Share links & quyền truy cập (kiểu Google Docs)** — link chia sẻ duy nhất `/?event_code=X`; quyền do 2 cột trên `events` quyết: `share_access` (`'restricted'` | `'link'`) + `share_role` (`'viewer'` | `'editor'`), mặc định `link`+`viewer`. `restricted`: GET trả 403 trừ owner/người được mời đích danh (event_collaborators) — event KHÔNG có chủ luôn xem được bất kể `share_access` (không có ai để giới hạn về); lookup cũng ẩn trừ owner và người được mời. `link`+`editor`: ai có link đều PUT được (không cần được mời riêng), nhưng KHÔNG xóa được — DELETE gọi `_check_edit_permission(..., allow_link_editor=False)`. Đổi cài đặt qua `PUT /api/events/<code>/sharing` (ai có quyền sửa đều đổi được, không bump `updated_at`; đặt `restricted` cho event không chủ bị từ chối → 400). Link cũ `/?event_code=X&key=...` vẫn mở được — tham số `key` bị bỏ qua (cơ chế edit key đã bỏ hoàn toàn). `/share/<code>` and `/event/<code>` are legacy routes that redirect to `/?event_code=X` (the JS also keeps a `/share/` path branch for the offline/service-worker fallback case). `index.html` contains no Jinja expressions; all routing state is parsed from the URL in JS.
+**Share links & quyền truy cập (kiểu Google Docs)** — link chia sẻ duy nhất `/?event_code=X`; quyền do 2 cột trên `events` quyết: `share_access` (`'restricted'` | `'link'`) + `share_role` (`'viewer'` | `'editor'`), mặc định `link`+`viewer`. `restricted`: GET trả 403 trừ owner/người được mời đích danh (event_collaborators) — event KHÔNG có chủ luôn xem được bất kể `share_access` (không có ai để giới hạn về); lookup cũng ẩn trừ owner và người được mời. `link`+`editor`: ai có link đều PUT được (không cần được mời riêng), nhưng KHÔNG xóa được — DELETE xét `may_delete` của `_event_access` (chỉ owner / event không chủ). Đổi cài đặt qua `PUT /api/events/<code>/sharing` (ai có quyền sửa đều đổi được, không bump `updated_at`; đặt `restricted` cho event không chủ bị từ chối → 400). Link cũ `/?event_code=X&key=...` vẫn mở được — tham số `key` bị bỏ qua (cơ chế edit key đã bỏ hoàn toàn). `/share/<code>` and `/event/<code>` are legacy routes that redirect to `/?event_code=X` (the JS also keeps a `/share/` path branch for the offline/service-worker fallback case). `index.html` contains no Jinja expressions; all routing state is parsed from the URL in JS.
 
 **Frontend** — SPA in three files: `templates/index.html` (markup only, no Jinja), `static/app.css`, and `static/app.js` (~2.8k lines; jQuery + Bootstrap from CDN). `static/auth.js` (`window.AppAuth`) wraps Supabase Auth (email/password + Google) and must be loaded before `app.js`; `app.js`'s boot code runs inside `AppAuth.onReady(...)` so it waits for the initial session check. `static/split.js` holds the pure split-money logic (`SplitLogic`, UMD — used by `app.js` in the browser and by `test_split.js` in Node); `app.js` only binds it to page state and renders. Key state lives in localStorage: `currentEventCode`, `savedEventCodes` (the "Sự Kiện Của Tôi" list — used ONLY when logged out; loaded via one batch `POST /api/events/lookup` — codes missing from the response get pruned), `bankInfo`. `eventEditKeys` is gone (a one-time `localStorage.removeItem('eventEditKeys')` runs at boot to clean up leftovers from older clients). Logged in: the list comes from `GET /api/my-events` (owned ∪ invited ∪ saved, with an `owned` flag) instead of localStorage; a one-time migration (`migrateLocalSavedEvents`, batches of 50, called from `AppAuth.onReady` and on `appauth:change`) pushes any local `savedEventCodes` to the account via `POST /api/my-events/save` and clears local storage only once that succeeds. The per-event action button reflects `owned`: owners see "Xóa sự kiện" (`.delete-event-btn`, hard delete); everyone else sees "Gỡ khỏi danh sách" (`.unsave-event-btn` — `DELETE /api/my-events/<code>` when logged in, local removal when logged out). Both handlers read the `data-event-code` attribute with `.attr()` rather than `.data()` (jQuery's `.data()` type-coerces all-numeric codes, corrupting them). `loadEventFromServer` sets `allowEdit` from `can_edit` and flips the UI to view-only; a 403 on save does the same. Boot nhanh: khi URL/localStorage có event code, app.js bắn GET event NGAY lúc boot (đọc token supabase-js trong localStorage đồng bộ qua `readCachedSupabaseToken`) song song với `/api/config` + `getSession`; `loadEventFromServer` chỉ nhận nuôi request sớm này khi token lúc bắn === `AppAuth.accessToken()` sau khi auth xong (lệch → request lại như cũ). Chart.js / xlsx / jsPDF / jspdf-autotable KHÔNG nằm trong index.html — được lazy-load trong app.js qua `loadScriptOnce(src, integrity)` (giữ SRI; `ensureChartJs`/`ensureXlsx`/`ensureJsPdf`) khi render biểu đồ hoặc bấm xuất file. Confirmation dialogs go through `showConfirm()` (the shared `#confirmModal`, which must stay LAST among the modals in the DOM so it stacks on top) — don't reintroduce native `confirm()`. `saveEvent` drives the `#saveStatus` header indicator (`setSaveStatus`: saving/saved/error). Modal `#historyModal` (nút "Lịch sử" trên header, chỉ khi allowEdit) hiển thị revisions + nút khôi phục qua showConfirm; `#confirmModal` vẫn phải là modal CUỐI trong DOM.
 
-**Service worker** (`static/sw.js`) — `/static/app.js`, `app.css`, `split.js` are served network-first (they change on deploy and have no hashed filenames); icons/banks.json are cache-first. Bump `CACHE_VERSION` when changing caching behavior.
+**Service worker** (`static/sw.js`) — `/static/app.js`, `app.css`, `split.js` are served network-first (they change on deploy and have no hashed filenames); icons/banks.json are cache-first. Network-first responses for precached paths overwrite the STATIC_CACHE entry (else offline would serve the stale install-time precache). KHÔNG bao giờ `cache.put` request mang header `Authorization` hoặc `/api/my-events` (response cá nhân hóa — offline không được phát lại cho phiên/người khác). Bump `CACHE_VERSION` when changing caching behavior.
+
+**Security headers** — `@app.after_request` trong `vercel_app.py` đặt CSP + X-Frame-Options DENY + HSTS + nosniff + Referrer-Policy + Permissions-Policy cho mọi response Flask; `/static/*` trên production do @vercel/static phục vụ nên header của chúng nằm trong `vercel.json`. CSP `script-src` KHÔNG có `'unsafe-inline'` → **cấm script inline trong `index.html`** (gtag init/speed-insights đã tách ra `/static/analytics.js` và `/static/speed-insights.js`); thêm CDN/endpoint mới (script, fetch, ảnh) thì phải bổ sung origin vào `_CSP`.
 
 **Money model** — all computation is normalized to VND. Expenses may carry a foreign `currency`; conversion uses the per-event `rates` map (`amountInVND()` returns `null` when a rate is missing, which blocks calculation and shows warnings). Exchange rates come from `/api/exchange-rates` with a fallback chain (fawazahmed0 → open.er-api.com → Vietcombank). The split algorithm is client-side in `SplitLogic.computeSplit` (`static/split.js`, unit-tested by `test_split.js`): per-member balances → "nhóm chung quỹ" (couples) merged into a primary member → balances rounded to integer VND with rounding drift folded into the largest balance (so transfers settle exactly, no 1-đồng leftovers) → greedy creditor/debtor matching. Beneficiaries semantics: mọi khoản chi lưu danh sách người hưởng ĐÍCH DANH — `getExpenseBeneficiaries()` luôn dùng `beneficiaries` đã lưu (lọc theo thành viên còn tồn tại), bất kể `benefitType`; chỉ fallback về danh sách hiện tại khi thiếu/rỗng. Form luôn lưu `benefitType: 'selected'` ("Tất cả" trên form chỉ là shortcut chốt đủ người lúc lưu); dữ liệu `'all'` cũ được `normalizeExpenses()` chuẩn hóa khi tải event và `migrate_beneficiaries.py` dọn một lần trên DB (chạy MỘT LẦN sau khi deploy code — xem thứ tự deploy trong docs/superpowers/specs/2026-08-13-per-member-beneficiaries-design.md). Thêm thành viên: hỏi có chia thêm vào các khoản đang phủ đủ thành viên cũ không (`countFullCoverage`/`addBeneficiaryToFullCoverage`, mặc định KHÔNG). Xóa thành viên: gỡ tên khỏi các khoản chi kèm xác nhận; chặn nếu là người thanh toán hoặc người hưởng duy nhất của khoản nào đó.
 
