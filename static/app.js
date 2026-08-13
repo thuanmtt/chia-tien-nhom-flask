@@ -1871,6 +1871,10 @@
                 const safeCode = escapeHtml(event.event_code);
                 // Owner → xóa thật; còn lại → chỉ gỡ khỏi danh sách của mình
                 const owned = !!(ownedByCode && ownedByCode[event.event_code]);
+                // Icon nhận biết event do mình tạo (HTML tĩnh, không dữ liệu user)
+                const ownerBadge = owned
+                    ? '<i class="fas fa-crown text-warning me-1" title="Sự kiện của bạn"></i>'
+                    : '';
                 const actionBtn = owned
                     ? `<button class="btn btn-sm btn-danger delete-event-btn" data-event-code="${safeCode}" title="Xóa sự kiện">
                             <i class="fas fa-trash"></i>
@@ -1882,7 +1886,7 @@
                 $('#savedEventsList').append(`
                     <div class="list-group-item list-group-item-action event-item" data-event-code="${safeCode}">
                         <div class="d-flex w-100 justify-content-between">
-                            <h5 class="mb-1">${escapeHtml(event.title)}</h5>
+                            <h5 class="mb-1">${ownerBadge}${escapeHtml(event.title)}</h5>
                             <small class="text-muted">${date} ${time}</small>
                         </div>
                         <div class="d-flex justify-content-between align-items-center">
