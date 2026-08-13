@@ -194,4 +194,36 @@ test('fuzz nhẹ: 50 bộ dữ liệu ngẫu nhiên-xác-định luôn tất to�
     }
 });
 
+test("freezeAllExpenses: chốt các khoản 'tất cả' thành 'selected' theo danh sách đưa vào", () => {
+    const expenses = [
+        { title: 'ăn', amount: 90000, payer: 'A', benefitType: 'all', beneficiaries: ['A', 'B', 'C'] },
+        { title: 'xe', amount: 30000, payer: 'B' }, // thiếu benefitType = 'all'
+        { title: 'taxi', amount: 60000, payer: 'C', benefitType: 'selected', beneficiaries: ['A', 'B'] },
+    ];
+    const count = S.freezeAllExpenses(expenses, ['A', 'B', 'C']);
+    assert.strictEqual(count, 2, 'phải chốt đúng 2 khoản đang chia cho tất cả');
+    assert.strictEqual(expenses[0].benefitType, 'selected');
+    assert.deepStrictEqual(expenses[0].beneficiaries, ['A', 'B', 'C']);
+    assert.strictEqual(expenses[1].benefitType, 'selected');
+    assert.deepStrictEqual(expenses[1].beneficiaries, ['A', 'B', 'C']);
+    // Khoản 'selected' sẵn có: giữ nguyên, không đụng vào
+    assert.strictEqual(expenses[2].benefitType, 'selected');
+    assert.deepStrictEqual(expenses[2].beneficiaries, ['A', 'B']);
+});
+
+test('freezeAllExpenses: thêm thành viên mới sau khi chốt — kết quả khoản cũ không đổi', () => {
+    const members = ['A', 'B', 'C'];
+    const expenses = [{ title: 'ăn', amount: 90000, payer: 'A', benefitType: 'all' }];
+    S.freezeAllExpenses(expenses, members);
+    // Cùng MỘT mảng members được push thêm người — helper phải copy snapshot,
+    // không giữ tham chiếu
+    members.push('D');
+    const r = S.computeSplit({ members, expenses });
+    // D vào sau, KHÔNG bị chia vào khoản đã chốt: A/B/C vẫn 30000 mỗi người
+    assert.strictEqual(r.roundedBalances['D'], 0);
+    assert.strictEqual(r.memberInfo['B'].needToPay, 30000);
+    assert.strictEqual(r.memberInfo['D'].needToPay, 0);
+    assertTransfersSettle(r);
+});
+
 console.log(`\n${passed} test passed${process.exitCode ? ' (CÓ TEST FAIL)' : ' — tất cả OK'}`);

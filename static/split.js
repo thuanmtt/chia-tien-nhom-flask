@@ -41,6 +41,21 @@
         return members;
     }
 
+    // "Chốt" các khoản đang chia cho tất cả (benefitType khác 'selected') thành
+    // 'selected' với danh sách members đưa vào — dùng khi thêm thành viên mới mà
+    // người dùng chọn KHÔNG chia các khoản cũ cho người mới. Sửa trực tiếp trên
+    // mảng expenses; trả về số khoản đã chốt.
+    function freezeAllExpenses(expenses, members) {
+        let count = 0;
+        (expenses || []).forEach(e => {
+            if (!e || e.benefitType === 'selected') return;
+            e.benefitType = 'selected';
+            e.beneficiaries = (members || []).slice();
+            count++;
+        });
+        return count;
+    }
+
     // Trả về map: memberName -> couple object (chỉ các nhóm hợp lệ: >=2 thành viên thực sự tồn tại)
     function getValidCouplesForMembers(currentMembers, coupleList) {
         const result = { byMember: {}, list: [] };
@@ -185,6 +200,7 @@
         getRateToVND: getRateToVND,
         amountInVND: amountInVND,
         getExpenseBeneficiaries: getExpenseBeneficiaries,
+        freezeAllExpenses: freezeAllExpenses,
         getValidCouplesForMembers: getValidCouplesForMembers,
         computeSplit: computeSplit,
     };

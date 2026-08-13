@@ -1910,6 +1910,9 @@
                 if (members.includes(memberName)) {
                     showToast('Thành viên này đã được thêm vào danh sách!', 'warning');
                 } else {
+                    // Chốt danh sách CŨ trước khi thêm — dùng nếu người dùng chọn
+                    // không chia các khoản "Tất cả" cho người mới
+                    const prevMembers = members.slice();
                     members.push(memberName);
                     renderMembers();
                     $('#memberName').val('');
@@ -1918,6 +1921,28 @@
                     saveEvent(false);
                     showToast(`Đã thêm thành viên "${memberName}"!`, 'success');
                     // Không cần gọi autoCalculate() vì đã được gọi trong renderMembers()
+
+                    // Các khoản "Tất cả" chia động theo danh sách hiện tại nên
+                    // người mới mặc định được tính vào — hỏi để người dùng quyết;
+                    // chọn "Không chia" thì chốt các khoản đó cho danh sách cũ.
+                    // Đóng hộp thoại (Hủy/ESC) = giữ hành vi cũ: chia cho người mới.
+                    const allCount = expenses.filter(e => e && e.benefitType !== 'selected').length;
+                    if (allCount > 0 && prevMembers.length > 0) {
+                        showConfirm(
+                            `Đang có ${allCount} khoản chi chia cho "Tất cả". Có chia các khoản này cho "${memberName}" nữa không?`,
+                            function () {
+                                SplitLogic.freezeAllExpenses(expenses, prevMembers);
+                                renderExpenses(); // đã gọi autoCalculate() bên trong
+                                saveEvent(false);
+                                showToast(`Đã giữ ${allCount} khoản chi cho ${prevMembers.length} thành viên cũ — "${memberName}" không bị tính vào các khoản đó.`, 'success');
+                            },
+                            {
+                                okLabel: 'Không chia',
+                                okClass: 'btn-primary',
+                                cancelLabel: `Có, chia cho "${memberName}"`,
+                            }
+                        );
+                    }
                 }
             } else {
                 showToast('Vui lòng nhập tên thành viên!', 'warning');
@@ -2789,6 +2814,9 @@
             $('#confirmModalOkBtn')
                 .text(opts.okLabel || 'Xác nhận')
                 .attr('class', 'btn ' + (opts.okClass || 'btn-danger'));
+            // Nhãn nút Hủy tùy biến được (vd. "Có, chia cho X") — luôn reset về
+            // mặc định để không rò rỉ nhãn sang các lần gọi khác
+            $('#confirmModalCancelBtn').text(opts.cancelLabel || 'Hủy');
             _confirmCallback = onConfirm;
             bootstrap.Modal.getOrCreateInstance(document.getElementById('confirmModal')).show();
         }

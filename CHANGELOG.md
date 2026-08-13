@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-08-13 — Hỏi trước khi chia khoản "Tất cả" cho thành viên mới
+
+- Khi thêm thành viên mà sự kiện đang có khoản chi chia cho "Tất cả", app hỏi
+  có chia các khoản đó cho người mới không. Chọn "Không chia" → các khoản này
+  được chốt lại cho danh sách thành viên cũ (chuyển thành "Chọn người hưởng");
+  chọn "Có" hoặc đóng hộp thoại → giữ như trước: người mới được tính vào.
+- Trước đây khoản "Tất cả" luôn tự chia lại cho người vào sau — gây bất ngờ khi
+  người mới bị tính vào các khoản chi từ trước khi họ tham gia.
+
 ## 2026-08-12 — "Sự Kiện Của Tôi" theo tài khoản + bỏ edit key
 
 - Danh sách "Sự Kiện Của Tôi" lưu theo tài khoản (bảng `saved_events`) — đổi máy vẫn thấy;
