@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-13 — Tải sự kiện nhanh hơn
+
+- Ghim serverless function về Singapore cùng region với database (`regions: sin1`) —
+  trước đó mỗi câu truy vấn phải bay vòng Mỹ ↔ Singapore (~220ms/câu).
+- Mở link sự kiện: app gọi dữ liệu sự kiện NGAY khi trang chạy, song song với
+  bước khởi tạo đăng nhập (trước đây phải chờ xong mới gọi — chậm thêm ~0.5–1s).
+- Backend đọc sự kiện bằng 1 câu truy vấn thay vì 7 câu tuần tự.
+- Thư viện biểu đồ và xuất Excel/PDF (~1.5MB) chỉ tải khi cần thay vì chặn
+  lúc mở trang — lần ghé đầu tiên nhẹ hơn hẳn, đặc biệt trên mạng di động.
+
 ## 2026-08-13 — Người hưởng đích danh cho mọi khoản chi
 
 - Mọi khoản chi giờ lưu rõ chia cho những ai — không còn kiểu "Tất cả" tự động chia
