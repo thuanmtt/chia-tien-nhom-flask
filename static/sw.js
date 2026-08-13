@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v6';
+const CACHE_VERSION = 'v7';
 const STATIC_CACHE = `chia-tien-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `chia-tien-runtime-${CACHE_VERSION}`;
 
@@ -76,12 +76,24 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(cacheFirst(request));
 });
 
+const PRECACHE_SET = new Set(PRECACHE_URLS);
+
+// KHÔNG cache response cá nhân hóa: request kèm Authorization (vd
+// /api/events/<code> trả can_edit/is_owner theo tài khoản) hay /api/my-events —
+// offline không được phát lại dữ liệu của người dùng khác/phiên khác.
+function shouldCacheResponse(request, url) {
+  if (request.headers.get('Authorization')) return false;
+  if (url.pathname === '/api/my-events') return false;
+  return true;
+}
+
 async function cacheFirst(request) {
   const cached = await caches.match(request);
   if (cached) return cached;
   try {
     const response = await fetch(request);
-    if (response.ok) {
+    const url = new URL(request.url);
+    if (response.ok && shouldCacheResponse(request, url)) {
       const cache = await caches.open(RUNTIME_CACHE);
       cache.put(request, response.clone());
     }
@@ -94,8 +106,13 @@ async function cacheFirst(request) {
 async function networkFirst(request, fallbackUrl) {
   try {
     const response = await fetch(request);
-    if (response.ok) {
-      const cache = await caches.open(RUNTIME_CACHE);
+    const url = new URL(request.url);
+    if (response.ok && shouldCacheResponse(request, url)) {
+      // Đường dẫn đã precache: ghi đè bản precache trong STATIC_CACHE —
+      // nếu ghi vào RUNTIME_CACHE, lúc offline caches.match() sẽ tìm thấy
+      // bản precache CŨ trong STATIC_CACHE trước và trả về bản ôi.
+      const cacheName = PRECACHE_SET.has(url.pathname) ? STATIC_CACHE : RUNTIME_CACHE;
+      const cache = await caches.open(cacheName);
       cache.put(request, response.clone());
     }
     return response;

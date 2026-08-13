@@ -24,26 +24,14 @@
     <meta name="apple-mobile-web-app-title" content="Chia Tiền">
     <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
 
-    <!-- Google tag (gtag.js) -->
+    <!-- Google tag (gtag.js) — phần init nằm ở /static/analytics.js: KHÔNG thêm
+         script inline vào trang này, CSP (vercel_app.py) không cho phép -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-85JFS83FXC"></script>
-    <script>
-        window.dataLayer = window.dataLayer || [];
-
-        function gtag() {
-            dataLayer.push(arguments);
-        }
-
-        gtag('js', new Date());
-
-        gtag('config', 'G-85JFS83FXC');
-    </script>
+    <script src="/static/analytics.js"></script>
     <!-- Vercel Web Analytics -->
     <script defer src="https://cdn.vercel-insights.com/v1/script.debug.js"></script>
     <!-- Vercel Speed Insights -->
-    <script type="module">
-        import { injectSpeedInsights } from 'https://cdn.jsdelivr.net/npm/@vercel/speed-insights@1/dist/index.mjs';
-        injectSpeedInsights();
-    </script>
+    <script type="module" src="/static/speed-insights.js"></script>
     <link rel="stylesheet" href="/static/app.css">
     <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet"
           integrity="sha384-OXVF05DQEe311p6ohU11NwlnX08FzMCsyoXzGOaL+83dKAb3qS17yZJxESl8YrJQ" crossorigin="anonymous" />
@@ -364,13 +352,14 @@
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Sự Kiện Đã Lưu Trên Máy Này</h5>
+                <h5 class="modal-title" id="savedEventsModalTitle">Sự Kiện Đã Lưu Trên Máy Này</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 <div class="alert alert-info mb-3">
                     <i class="fas fa-info-circle me-2"></i>
-                    Danh sách này chỉ hiển thị các sự kiện đã được lưu trên máy này. Mỗi máy sẽ có danh sách sự kiện riêng.
+                    <!-- Nội dung được app.js cập nhật theo trạng thái đăng nhập -->
+                    <span id="savedEventsModalDesc">Danh sách này chỉ hiển thị các sự kiện đã được lưu trên máy này. Mỗi máy sẽ có danh sách sự kiện riêng.</span>
                 </div>
                 <div id="savedEventsList" class="list-group"></div>
             </div>

@@ -284,10 +284,10 @@
                 // Ẩn các nút action trong danh sách thành viên và chi phí
                 $('.member-close').hide();
                 $('.action-btn').hide();
-                
-                // Ẩn nút copy trong kết quả
-                $('#copyTransfersBtn').hide();
-                
+
+                // Nút sao chép giao dịch VẪN hiển thị ở chế độ chỉ xem —
+                // người nhận link chính là người cần danh sách chuyển tiền
+
                 // Thay đổi tiêu đề navbar
                 $('.navbar-brand').html('<i class="fas fa-eye me-2"></i>Xem Sự Kiện (Chế Độ Chỉ Xem)');
                 
@@ -312,10 +312,7 @@
                 // Hiện lại các nút action
                 $('.member-close').show();
                 $('.action-btn').show();
-                
-                // Hiện lại nút copy
-                $('#copyTransfersBtn').show();
-                
+
                 // Khôi phục tiêu đề navbar
                 $('.navbar-brand').html('<i class="fas fa-money-bill-wave me-2"></i>Ứng Dụng Chia Tiền Nhóm');
                 
@@ -328,10 +325,13 @@
         $.getJSON('/api/banks', function (data) {
             const banks = data.data.filter(bank => bank.supported);
             banks.forEach(bank => {
+                // Dựng option qua DOM API (.val()/.text()/.attr()) — không nội suy
+                // chuỗi HTML từ dữ liệu ngoài (code/short_name/name)
                 $('#bankInfoBank').append(
-                    `<option value="${bank.code}" data-image="https://qr.sepay.vn/assets/img/banklogo/${bank.code}.png">
-                        ${bank.short_name} - ${bank.name}
-                    </option>`
+                    $('<option>')
+                        .val(bank.code)
+                        .attr('data-image', 'https://qr.sepay.vn/assets/img/banklogo/' + encodeURIComponent(bank.code) + '.png')
+                        .text(bank.short_name + ' - ' + bank.name)
                 );
             });
 
@@ -359,7 +359,12 @@
 
             members.forEach(member => {
                 const info = bankInfo[member] || {};
-                const bankOption = $('#bankInfoBank option[value="' + (info.bank || '') + '"]');
+                // So theo value bằng .filter() thay vì nội suy vào selector —
+                // giá trị chứa ký tự đặc biệt sẽ làm selector throw/vỡ render
+                const bankValue = info.bank || '';
+                const bankOption = $('#bankInfoBank option').filter(function () {
+                    return $(this).val() === bankValue;
+                }).first();
                 const bankName = bankOption.text() || '';
                 const bankLogo = bankOption.data('image') ? `<img src="${bankOption.data('image')}" style="height:16px;width:auto;vertical-align:middle;margin-right:8px;"/>` : '';
 
@@ -477,7 +482,9 @@
             }
 
             const bankInfoTo = bankInfo[to];
-            const qrUrl = `https://qr.sepay.vn/img?acc=${bankInfoTo.account}&bank=${bankInfoTo.bank}&amount=${amount}&template=compact&download=false`;
+            // encodeURIComponent: account/bank là dữ liệu người dùng — không được
+            // chèn thẳng vào query string
+            const qrUrl = `https://qr.sepay.vn/img?acc=${encodeURIComponent(bankInfoTo.account)}&bank=${encodeURIComponent(bankInfoTo.bank)}&amount=${encodeURIComponent(amount)}&template=compact&download=false`;
             // qrUrl += `&des=Chuyen tien cho ${to}`;
 
             $('#qrCodeImage').attr('src', qrUrl);
@@ -634,7 +641,11 @@
         // ===== Hết phần chia sẻ =====
 
         // Indicator trạng thái lưu ở header: Đang lưu... / Đã lưu lúc HH:MM / lỗi
+        // lastSaveFailed: lần lưu gần nhất lỗi → còn thay đổi chưa lên server
+        let lastSaveFailed = false;
         function setSaveStatus(state) {
+            if (state === 'error') lastSaveFailed = true;
+            else if (state === 'saved' || state === '') lastSaveFailed = false;
             const $s = $('#saveStatus');
             if (!$s.length) return;
             if (state === 'saving') {
@@ -652,6 +663,15 @@
                 $s.attr('class', 'text-muted ms-2').empty();
             }
         }
+
+        // Cảnh báo trước khi rời trang khi còn thay đổi chưa lưu xong:
+        // đang lưu dở, có lần lưu đang chờ nối tiếp, hoặc lần lưu gần nhất lỗi.
+        window.addEventListener('beforeunload', function (e) {
+            if (saveInFlight || savePendingAgain || lastSaveFailed) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        });
 
         // ===== Lưu dữ liệu lên server =====
         // Các lần lưu được TUẦN TỰ HÓA: chỉ 1 request tại một thời điểm, các
@@ -824,17 +844,9 @@
                     isOwner = !!eventData.is_owner;
                     setSaveStatus(''); // dữ liệu vừa tải, chưa có thay đổi cần lưu
 
-                    // Cập nhật tên sự kiện
+                    // Cập nhật tên sự kiện + mã sự kiện hiển thị
                     $('#eventTitle').text(eventData.title);
-                    // Sau khi set currentEventCode hoặc tạo mới sự kiện, cập nhật eventCodeDisplay
-                    function updateEventCodeDisplay() {
-                        if (currentEventCode) {
-                            $('#eventCodeDisplay').text(currentEventCode);
-                        } else {
-                            $('#eventCodeDisplay').text('');
-                        }
-                    }
-                    updateEventCodeDisplay();
+                    $('#eventCodeDisplay').text(currentEventCode || '');
 
                     // Cập nhật thành viên & nhóm chung quỹ
                     members = eventData.members || [];
@@ -907,7 +919,7 @@
                 $('#membersList').append(`
                 <div class="member-pill">
                     ${escapeHtml(member)}${badge}
-                    <span class="member-close" data-index="${index}" style="${!allowEdit ? 'display: none;' : ''}"><i class="fas fa-times"></i></span>
+                    <button type="button" class="member-close" data-index="${index}" aria-label="Xóa thành viên ${escapeHtml(member)}" style="${!allowEdit ? 'display: none;' : ''}"><i class="fas fa-times" aria-hidden="true"></i></button>
                 </div>
             `);
 
@@ -1594,12 +1606,12 @@
                     ${timeInfoDisplay}
                 </div>
                 <div style="${!allowEdit ? 'display: none;' : ''}">
-                    <span class="action-btn edit-expense" data-index="${index}">
-                        <i class="fas fa-edit"></i>
-                    </span>
-                    <span class="action-btn delete-expense" data-index="${index}">
-                        <i class="fas fa-trash"></i>
-                    </span>
+                    <button type="button" class="action-btn edit-expense" data-index="${index}" aria-label="Sửa khoản chi ${escapeHtml(expense.title)}">
+                        <i class="fas fa-edit" aria-hidden="true"></i>
+                    </button>
+                    <button type="button" class="action-btn delete-expense" data-index="${index}" aria-label="Xóa khoản chi ${escapeHtml(expense.title)}">
+                        <i class="fas fa-trash" aria-hidden="true"></i>
+                    </button>
                 </div>
             </div>
         </div>
@@ -1634,8 +1646,20 @@
         // ===== "Sự Kiện Của Tôi" =====
         // Đăng nhập: danh sách lưu THEO TÀI KHOẢN (bảng saved_events, đồng bộ
         // giữa các thiết bị). Chưa đăng nhập: localStorage như cũ (chỉ để xem).
+        // Đọc savedEventCodes từ localStorage an toàn: dữ liệu hỏng (JSON lỗi,
+        // không phải mảng chuỗi) → trả [] thay vì throw làm kẹt luồng đang chạy.
+        function readSavedEventCodes() {
+            try {
+                const codes = JSON.parse(localStorage.getItem('savedEventCodes') || '[]');
+                if (!Array.isArray(codes)) return [];
+                return codes.filter(code => typeof code === 'string');
+            } catch (e) {
+                return [];
+            }
+        }
+
         function saveEventCodeToLocalStorage(eventCode) {
-            let savedEventCodes = JSON.parse(localStorage.getItem('savedEventCodes') || '[]');
+            const savedEventCodes = readSavedEventCodes();
             if (!savedEventCodes.includes(eventCode)) {
                 savedEventCodes.push(eventCode);
                 localStorage.setItem('savedEventCodes', JSON.stringify(savedEventCodes));
@@ -1643,8 +1667,7 @@
         }
 
         function removeEventCodeFromLocalStorage(eventCode) {
-            let savedEventCodes = JSON.parse(localStorage.getItem('savedEventCodes') || '[]');
-            savedEventCodes = savedEventCodes.filter(code => code !== eventCode);
+            const savedEventCodes = readSavedEventCodes().filter(code => code !== eventCode);
             localStorage.setItem('savedEventCodes', JSON.stringify(savedEventCodes));
         }
 
@@ -1670,13 +1693,8 @@
         // ở lần merge sau. Thất bại thì giữ nguyên local, lần đăng nhập sau thử lại.
         function migrateLocalSavedEvents() {
             if (!AppAuth.isLoggedIn()) return;
-            let codes;
-            try {
-                codes = JSON.parse(localStorage.getItem('savedEventCodes') || '[]');
-            } catch (e) {
-                codes = [];
-            }
-            if (!Array.isArray(codes) || codes.length === 0) return;
+            const codes = readSavedEventCodes();
+            if (codes.length === 0) return;
             const batches = [];
             for (let i = 0; i < codes.length; i += 50) batches.push(codes.slice(i, i + 50));
             Promise.all(batches.map(batch => $.ajax({
@@ -1702,6 +1720,15 @@
                 ? 'Chưa có sự kiện nào trong tài khoản của bạn.'
                 : 'Chưa có sự kiện nào được lưu trên máy này.';
 
+            // Tiêu đề + mô tả modal theo trạng thái đăng nhập: đăng nhập → danh
+            // sách đồng bộ theo tài khoản; chưa đăng nhập → danh sách của máy này.
+            $('#savedEventsModalTitle').text(loggedIn
+                ? 'Sự Kiện Của Tôi'
+                : 'Sự Kiện Đã Lưu Trên Máy Này');
+            $('#savedEventsModalDesc').text(loggedIn
+                ? 'Danh sách này đồng bộ theo tài khoản của bạn (sự kiện bạn sở hữu, được mời hoặc đã lưu) — đăng nhập trên máy nào cũng thấy.'
+                : 'Danh sách này chỉ hiển thị các sự kiện đã được lưu trên máy này. Mỗi máy sẽ có danh sách sự kiện riêng.');
+
             function fail() {
                 $('#savedEventsList').empty();
                 $('#savedEventsList').append('<p class="text-center text-danger">Không tải được danh sách sự kiện. Vui lòng thử lại.</p>');
@@ -1709,33 +1736,33 @@
 
             // localCodes chỉ có ở nhánh chưa đăng nhập — dùng để dọn mã đã chết
             function proceed(codes, ownedByCode, localCodes) {
-                // lookup nhận tối đa 50 mã
-                const allCodes = codes.slice(0, 50);
-                if (allCodes.length === 0) {
+                if (codes.length === 0) {
                     $('#savedEventsList').empty();
                     $('#savedEventsList').append(`<p class="text-center text-muted">${emptyText}</p>`);
                     return;
                 }
-                // Chỉ dọn các mã LOCAL đã thực sự được gửi đi tra cứu — mã bị cắt
-                // bớt do vượt giới hạn 50 không đồng nghĩa là không còn tồn tại.
-                const sentLocal = (localCodes || []).filter(code => allCodes.includes(code));
-                $.ajax({
+                // lookup nhận tối đa 50 mã/request → chia lô, tra song song rồi gộp
+                const batches = [];
+                for (let i = 0; i < codes.length; i += 50) batches.push(codes.slice(i, i + 50));
+                Promise.all(batches.map(batch => $.ajax({
                     url: '/api/events/lookup',
                     method: 'POST',
                     contentType: 'application/json',
                     // Kèm JWT: event ở chế độ "Hạn chế" chỉ hiện với owner/người được mời
                     headers: AppAuth.authHeaders(),
-                    data: JSON.stringify({ codes: allCodes }),
-                    success: function (response) {
-                        const events = (response && response.events) || [];
-                        const found = new Set(events.map(e => e.event_code));
-                        sentLocal
-                            .filter(code => !found.has(code))
-                            .forEach(removeEventCodeFromLocalStorage);
-                        displaySavedEvents(events, ownedByCode, emptyText);
-                    },
-                    error: fail
-                });
+                    data: JSON.stringify({ codes: batch }),
+                }).then(function (response) {
+                    return (response && response.events) || [];
+                }))).then(function (results) {
+                    const events = [].concat(...results);
+                    // Chỉ dọn mã LOCAL khi TẤT CẢ các lô tra cứu thành công —
+                    // lỗi mạng ở lô nào đó không đồng nghĩa event không còn tồn tại.
+                    const found = new Set(events.map(e => e.event_code));
+                    (localCodes || [])
+                        .filter(code => !found.has(code))
+                        .forEach(removeEventCodeFromLocalStorage);
+                    displaySavedEvents(events, ownedByCode, emptyText);
+                }).catch(fail);
             }
 
             if (loggedIn) {
@@ -1748,7 +1775,7 @@
                     })
                     .fail(fail);
             } else {
-                const localCodes = JSON.parse(localStorage.getItem('savedEventCodes') || '[]');
+                const localCodes = readSavedEventCodes();
                 proceed(localCodes, {}, localCodes);
             }
         }
@@ -2206,14 +2233,18 @@
             const cur = getCurrencyOfExpense(expense) || 'VND';
             const amountDisplay = new Intl.NumberFormat('vi-VN').format(Math.round(expense.amount || 0)) + ' ' + cur;
             showConfirm(`Bạn có chắc chắn muốn xoá chi phí "${title}" (${amountDisplay})?`, function () {
-                expenses.splice(index, 1);
+                // index chụp trước khi showConfirm mở có thể ôi (mảng expenses bị
+                // thay do reload nền 409/đổi tài khoản) — tra lại theo object.
+                const idx = expenses.indexOf(expense);
+                if (idx === -1) return;
+                expenses.splice(idx, 1);
 
                 // Đồng bộ editingExpenseIndex nếu đang ở edit mode
                 if (editingExpenseIndex !== null) {
-                    if (editingExpenseIndex === index) {
+                    if (editingExpenseIndex === idx) {
                         // Xoá chính expense đang sửa → thoát edit mode
                         exitEditExpenseMode();
-                    } else if (editingExpenseIndex > index) {
+                    } else if (editingExpenseIndex > idx) {
                         editingExpenseIndex -= 1;
                     }
                 }
@@ -2456,12 +2487,6 @@
         // ======= Hết phần nhóm chung quỹ =======
 
         // ======= Cấu hình tỷ giá =======
-        function todayYYYYMMDD() {
-            const d = new Date();
-            const pad = n => n.toString().padStart(2, '0');
-            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-        }
-
         function renderRatesTable() {
             const $tb = $('#ratesTableBody');
             $tb.empty();
@@ -2506,7 +2531,7 @@
         function openRatesModal() {
             if (!allowEdit) return;
             ratesDraft = JSON.parse(JSON.stringify(rates || {}));
-            $('#ratesDate').val(todayYYYYMMDD());
+            $('#ratesDate').val(todayISODate());
             $('#ratesStatus').text('');
             renderRatesTable();
             $('#ratesModal').modal('show');
@@ -2529,7 +2554,7 @@
         };
 
         $('#fetchRatesBtn').click(function () {
-            const date = $('#ratesDate').val() || todayYYYYMMDD();
+            const date = $('#ratesDate').val() || todayISODate();
             const rateType = $('#ratesType').val() || 'mid';
             const $btn = $(this);
             $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Đang lấy...');
@@ -3002,10 +3027,9 @@
             });
         }
 
-        // Xử lý sao chép giao dịch
+        // Xử lý sao chép giao dịch (cho phép cả ở chế độ chỉ xem — người nhận
+        // link chính là người cần danh sách chuyển tiền)
         $('#copyTransfersBtn').click(function () {
-            if (!allowEdit) return; // Không cho phép copy nếu ở chế độ chỉ xem
-            
             if ($('#transfersList').children().length === 0 ||
                 $('#transfersList').text().includes('Không cần chuyển tiền')) {
                 showToast('Không có giao dịch nào để sao chép!', 'warning');
@@ -3292,7 +3316,10 @@
             if (!option.id) return option.text; // placeholder không có logo
             var img = $(option.element).data('image');
             if (img) {
-                return $(`<span><img src="${img}" /> ${option.text}</span>`);
+                // Dựng bằng DOM API — không nội suy img/option.text vào chuỗi HTML
+                return $('<span>')
+                    .append($('<img>').attr('src', img))
+                    .append(document.createTextNode(' ' + option.text));
             }
             return option.text;
         }
