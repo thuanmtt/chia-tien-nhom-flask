@@ -21,8 +21,20 @@ from dotenv import load_dotenv
 
 def main():
     load_dotenv()
-    dry_run = '--dry-run' in sys.argv
-    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+
+    # Chặn gõ nhầm cờ (vd. --dryrun) chạy thẳng vào DB thật.
+    args = sys.argv[1:]
+    if any(a != '--dry-run' for a in args):
+        print(f'Tham số không hợp lệ: {" ".join(args)}. Chỉ chấp nhận --dry-run.', file=sys.stderr)
+        sys.exit(2)
+    dry_run = '--dry-run' in args
+
+    database_url = os.environ.get('DATABASE_URL')
+    if not database_url:
+        print('Thiếu biến môi trường DATABASE_URL — kiểm tra file .env hoặc env Vercel.', file=sys.stderr)
+        sys.exit(1)
+
+    conn = psycopg2.connect(database_url)
     try:
         cur = conn.cursor()
 

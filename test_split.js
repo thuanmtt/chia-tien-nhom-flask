@@ -229,7 +229,7 @@ test('normalizeExpenses: chuyển khoản không-selected thành selected theo s
     assert.deepStrictEqual(expenses[0].beneficiaries, ['A', 'B']); // lọc 'Đã Xóa'
     assert.strictEqual(expenses[1].benefitType, 'selected');
     assert.deepStrictEqual(expenses[1].beneficiaries, ['A', 'B', 'C']); // fallback
-    // Copy, không giữ tham chiếu mảy members
+    // Copy, không giữ tham chiếu mảng members
     members.push('D');
     assert.deepStrictEqual(expenses[1].beneficiaries, ['A', 'B', 'C']);
     // Khoản 'selected' sẵn có: không đụng

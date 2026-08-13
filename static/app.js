@@ -1972,7 +1972,11 @@
                     }
                 });
 
-                members.splice(index, 1);
+                // index chụp trước khi showConfirm mở có thể ôi (mảng members đổi do
+                // reload nền) — tra lại theo tên thay vì dùng index cũ.
+                const idx = members.indexOf(memberToRemove);
+                if (idx === -1) return;
+                members.splice(idx, 1);
 
                 // Dọn khỏi các nhóm chung quỹ
                 couples = (couples || []).map(c => {
@@ -3116,6 +3120,9 @@
             $('#expenseTitle').val('');
             $('#expenseAmount').val('');
             resetExpenseDateInput();
+            // Reset dropdown người hưởng — khoản MỚI tiếp theo mặc định "Tất cả",
+            // tránh thừa hưởng 'selected' + tick của khoản vừa sửa xong.
+            $('#benefitType').val('all').trigger('change');
             updateAmountPreview();
             renderExpenses();
         }

@@ -2,7 +2,7 @@
 
 ## 2026-08-13 — Người hưởng đích danh cho mọi khoản chi
 
-- Mọi khoản chi giờ lưu rõ chia cho AI — không còn kiểu "Tất cả" tự động chia
+- Mọi khoản chi giờ lưu rõ chia cho những ai — không còn kiểu "Tất cả" tự động chia
   lại khi nhóm thay đổi. Chọn "Tất cả" khi nhập chỉ là cách tick nhanh đủ mọi
   người tại thời điểm đó.
 - Thêm thành viên mới: app hỏi có chia thêm người đó vào các khoản đang chia
