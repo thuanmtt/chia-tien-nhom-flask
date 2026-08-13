@@ -1939,38 +1939,61 @@
         // Xử lý xóa thành viên
         $(document).on('click', '.member-close', function () {
             if (!allowEdit) return; // Không cho phép xóa nếu ở chế độ chỉ xem
-            
+
             const index = $(this).data('index');
             const memberToRemove = members[index];
 
-            // Kiểm tra xem thành viên có chi phí nào không
-            const hasExpenses = expenses.some(expense => expense.payer === memberToRemove);
-
-            // Chỉ chặn nếu là người hưởng ĐÍCH DANH ('selected'); các khoản
-            // "cho tất cả" tự chia lại theo danh sách thành viên hiện tại
-            const isBeneficiary = expenses.some(expense => expense.benefitType === 'selected'
-                && expense.beneficiaries && expense.beneficiaries.includes(memberToRemove));
-
-            if (hasExpenses || isBeneficiary) {
-                showToast('Không thể xóa thành viên này vì họ đã có chi phí trong danh sách. Vui lòng xóa chi phí trước!', 'error');
+            // Người thanh toán của khoản nào đó → phải xử lý khoản chi trước
+            if (expenses.some(expense => expense.payer === memberToRemove)) {
+                showToast('Không thể xóa thành viên này vì họ là người thanh toán của chi phí trong danh sách. Vui lòng xóa/sửa chi phí trước!', 'error');
                 return;
             }
 
-            members.splice(index, 1);
+            // Người hưởng DUY NHẤT của khoản nào đó → xóa làm khoản chi mất nghĩa
+            const soleTitles = expenses
+                .filter(expense => {
+                    const bens = getExpenseBeneficiaries(expense);
+                    return bens.length === 1 && bens[0] === memberToRemove;
+                })
+                .map(expense => expense.title || '(không tên)');
+            if (soleTitles.length > 0) {
+                showToast(`Không thể xóa "${memberToRemove}" — là người hưởng duy nhất của: ${soleTitles.join(', ')}. Vui lòng sửa/xóa các khoản đó trước!`, 'error');
+                return;
+            }
 
-            // Dọn khỏi các nhóm chung quỹ
-            couples = (couples || []).map(c => {
-                const remaining = (c.members || []).filter(m => m !== memberToRemove);
-                const primary = remaining.includes(c.primary) ? c.primary : (remaining[0] || '');
-                return { ...c, members: remaining, primary };
-            }).filter(c => c.members.length >= 2);
+            const benefitCount = expenses.filter(expense =>
+                Array.isArray(expense.beneficiaries) && expense.beneficiaries.includes(memberToRemove)).length;
 
-            renderMembers();
+            const doRemove = function () {
+                // Gỡ tên khỏi danh sách người hưởng của mọi khoản chi
+                expenses.forEach(expense => {
+                    if (Array.isArray(expense.beneficiaries)) {
+                        expense.beneficiaries = expense.beneficiaries.filter(m => m !== memberToRemove);
+                    }
+                });
 
-            // Tự động lưu sau khi xóa thành viên
-            saveEvent(false);
-            showToast(`Đã xoá thành viên "${memberToRemove}"!`, 'success');
-            // Không cần gọi autoCalculate() vì đã được gọi trong renderMembers()
+                members.splice(index, 1);
+
+                // Dọn khỏi các nhóm chung quỹ
+                couples = (couples || []).map(c => {
+                    const remaining = (c.members || []).filter(m => m !== memberToRemove);
+                    const primary = remaining.includes(c.primary) ? c.primary : (remaining[0] || '');
+                    return { ...c, members: remaining, primary };
+                }).filter(c => c.members.length >= 2);
+
+                renderMembers();
+                renderExpenses(); // cập nhật cột người hưởng + autoCalculate
+
+                // Tự động lưu sau khi xóa thành viên
+                saveEvent(false);
+                showToast(`Đã xoá thành viên "${memberToRemove}"!`, 'success');
+            };
+
+            if (benefitCount > 0) {
+                showConfirm(`Gỡ "${memberToRemove}" khỏi ${benefitCount} khoản chi và xóa khỏi nhóm?`, doRemove, { okLabel: 'Gỡ và xóa' });
+            } else {
+                doRemove();
+            }
         });
 
         // Xử lý thêm chi phí
