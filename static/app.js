@@ -175,6 +175,50 @@
             $('#appLoading').toggleClass('d-none', !show);
         }
 
+        // Event code sẽ mở lúc boot: link /share/ cũ, ?event_code=, hoặc event
+        // gần nhất trong localStorage.
+        const bootEventCode = window.location.pathname.startsWith('/share/')
+            ? (window.location.pathname.split('/')[2] || null)
+            : (urlEventCode || currentEventCode);
+
+        // Đọc access token supabase-js đã lưu trong localStorage (ĐỒNG BỘ, không
+        // chờ mạng) — chỉ tin khi còn hạn >30s; token hỏng/hết hạn coi như chưa
+        // đăng nhập, auth thật sẽ refresh sau.
+        function readCachedSupabaseToken() {
+            try {
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (!/^sb-.+-auth-token$/.test(key)) continue;
+                    const stored = JSON.parse(localStorage.getItem(key));
+                    // supabase-js v2 lưu thẳng session; bản cũ bọc trong currentSession
+                    const s = stored && (stored.currentSession || stored);
+                    if (s && s.access_token && s.expires_at
+                            && s.expires_at * 1000 > Date.now() + 30000) {
+                        return s.access_token;
+                    }
+                }
+            } catch (e) { /* dữ liệu hỏng → coi như chưa đăng nhập */ }
+            return null;
+        }
+
+        // Bắn GET event NGAY, song song với /api/config + getSession của auth.js —
+        // loadEventFromServer chỉ "nhận nuôi" kết quả khi token lúc bắn trùng với
+        // session thật sau khi auth xong (cả hai null = cùng ẩn danh), lệch thì
+        // request lại như cũ. KHÔNG gắn handler ở đây để lỗi 403/404 sớm không
+        // kích toast trước khi auth sẵn sàng.
+        let earlyEventXhr = null;
+        let earlyEventToken = null;
+        let earlyEventCode = null;
+        if (bootEventCode) {
+            earlyEventToken = readCachedSupabaseToken();
+            earlyEventCode = bootEventCode;
+            earlyEventXhr = $.ajax({
+                url: `/api/events/${bootEventCode}`,
+                method: 'GET',
+                headers: earlyEventToken ? { 'Authorization': 'Bearer ' + earlyEventToken } : {}
+            });
+        }
+
         // Đang mở một sự kiện có sẵn? Che trang bằng overlay + đặt UI tạm theo
         // quyền dự đoán — người nhận link chỉ-xem sẽ không thấy "chớp" giao
         // diện chỉnh sửa trong lúc chờ server xác nhận quyền thật (can_edit).
@@ -741,11 +785,25 @@
         // chia sẻ), cờ này quyết định giao diện chỉnh sửa hay chỉ xem.
         function loadEventFromServer(eventCode, opts) {
             opts = opts || {};
-            $.ajax({
-                url: `/api/events/${eventCode}`,
-                method: 'GET',
-                headers: AppAuth.authHeaders(),
-                success: function(response) {
+            // Nhận nuôi request bắn sớm lúc boot (chỉ dùng một lần): phải đúng
+            // event code VÀ token lúc bắn trùng session hiện tại — lệch (token
+            // vừa refresh / đổi tài khoản) thì bỏ, request lại với token thật.
+            let req = null;
+            if (earlyEventXhr) {
+                const early = earlyEventXhr;
+                const matches = earlyEventCode === eventCode
+                    && earlyEventToken === AppAuth.accessToken();
+                earlyEventXhr = null;
+                if (matches) req = early;
+            }
+            if (!req) {
+                req = $.ajax({
+                    url: `/api/events/${eventCode}`,
+                    method: 'GET',
+                    headers: AppAuth.authHeaders()
+                });
+            }
+            req.done(function(response) {
                     if (response.success) {
                         const eventData = response.event;
                         currentEventCode = eventData.event_code;
@@ -818,8 +876,7 @@
                         showToast('Không tìm thấy sự kiện!', 'error');
                         createNewEvent();
                     }
-                },
-                error: function(xhr) {
+            }).fail(function(xhr) {
                     if (xhr && xhr.status === 403) {
                         // Chế độ "Hạn chế" — chỉ chủ sở hữu truy cập được
                         showToast('Sự kiện đang ở chế độ hạn chế — chỉ chủ sở hữu mới truy cập được.', 'error');
@@ -827,7 +884,6 @@
                         showToast('Lỗi khi tải sự kiện!', 'error');
                     }
                     createNewEvent();
-                }
             });
         }
 
@@ -957,6 +1013,50 @@
             if (prevBenef && members.includes(prevBenef)) $benef.val(prevBenef);
         }
 
+        // ===== Lazy-load thư viện nặng (Chart.js, xlsx, jsPDF) =====
+        // Không nằm trong index.html nữa để khỏi chặn boot (~1.5MB lần ghé đầu);
+        // tải khi cần bằng thẻ script động, GIỮ NGUYÊN SRI hash — đổi phiên bản
+        // thì tính lại hash như quy ước CDN trong CLAUDE.md.
+        const _lazyScriptPromises = {};
+        function loadScriptOnce(src, integrity) {
+            if (_lazyScriptPromises[src]) return _lazyScriptPromises[src];
+            _lazyScriptPromises[src] = new Promise(function (resolve, reject) {
+                const el = document.createElement('script');
+                el.src = src;
+                el.integrity = integrity;
+                el.crossOrigin = 'anonymous';
+                el.onload = function () { resolve(); };
+                el.onerror = function () {
+                    // Xóa promise lỗi để lần bấm sau thử tải lại được
+                    delete _lazyScriptPromises[src];
+                    reject(new Error('Không tải được ' + src));
+                };
+                document.head.appendChild(el);
+            });
+            return _lazyScriptPromises[src];
+        }
+        function ensureChartJs() {
+            if (typeof Chart !== 'undefined') return Promise.resolve();
+            return loadScriptOnce('https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js',
+                'sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4');
+        }
+        function ensureXlsx() {
+            if (typeof XLSX !== 'undefined') return Promise.resolve();
+            return loadScriptOnce('https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js',
+                'sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT');
+        }
+        function ensureJsPdf() {
+            // autotable phải nạp SAU jspdf (plugin gắn vào window.jspdf)
+            const base = (window.jspdf && window.jspdf.jsPDF)
+                ? Promise.resolve()
+                : loadScriptOnce('https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js',
+                    'sha384-en/ztfPSRkGfME4KIm05joYXynqzUgbsG5nMrj/xEFAHXkeZfO3yMK8QQ+mP7p1/');
+            return base.then(function () {
+                return loadScriptOnce('https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js',
+                    'sha384-Xl/CUCfJbzsngMp0CFxkmF0VW/8C160IsGujqeQlIhaGxKz2+JsIGORFqtCPeldF');
+            });
+        }
+
         // Hàm hiển thị danh sách chi phí
         let dailyStatsChartInstance = null;
 
@@ -970,6 +1070,15 @@
                     dailyStatsChartInstance.destroy();
                     dailyStatsChartInstance = null;
                 }
+                return;
+            }
+
+            // Chart.js lazy-load: lần đầu có dữ liệu mới tải thư viện rồi render
+            // lại; tải hỏng (offline) → ẩn khối biểu đồ, phần còn lại chạy bình thường
+            if (typeof Chart === 'undefined') {
+                ensureChartJs()
+                    .then(function () { renderDailyStats(sourceList); })
+                    .catch(function () { $container.addClass('d-none'); });
                 return;
             }
 
@@ -2136,13 +2245,18 @@
             if (dailyStatsChartInstance) dailyStatsChartInstance.resize();
         });
 
-        // Xuất Excel / PDF
-        $('#exportExcelBtn').click(exportExpensesToExcel);
+        // Xuất Excel / PDF — thư viện lazy-load, tải xong mới export
+        $('#exportExcelBtn').click(function () {
+            ensureXlsx().then(exportExpensesToExcel).catch(function () {
+                showToast('Không tải được thư viện xuất Excel — kiểm tra mạng rồi thử lại.', 'error');
+            });
+        });
         $('#exportPdfBtn').click(async function () {
             const $btn = $(this);
             const original = $btn.html();
             $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Đang xuất...');
             try {
+                await ensureJsPdf();
                 await exportExpensesToPDF();
             } catch (err) {
                 console.error(err);

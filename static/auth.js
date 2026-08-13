@@ -16,6 +16,12 @@
 
     function isLoggedIn() { return !!session; }
 
+    // Token của session hiện tại (null nếu chưa đăng nhập) — app.js dùng để
+    // đối chiếu với request GET event bắn sớm lúc boot (trước khi auth xong)
+    function accessToken() {
+        return (session && session.access_token) || null;
+    }
+
     function userEmail() {
         return (session && session.user && session.user.email) || '';
     }
@@ -322,6 +328,7 @@
         onReady: onReady,
         isLoggedIn: isLoggedIn,
         userEmail: userEmail,
+        accessToken: accessToken,
         authHeaders: authHeaders,
         showLoginModal: showLoginModal
     };

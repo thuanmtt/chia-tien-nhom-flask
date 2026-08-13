@@ -263,73 +263,57 @@ def replace_event_children(cursor, event_id, data):
         )
 
 
+# MỘT câu SELECT trả cả 7 bảng con dạng JSON array (1 round-trip thay vì 7 —
+# đáng kể trên serverless vì query chạy tuần tự). Alias trùng tên key mà
+# rows_to_document nhận; json_agg trả NULL khi bảng rỗng nên coalesce về '[]'.
+# numeric (amount, rate) thành JSON number → psycopg2 parse ra float, khớp _num().
+_LOAD_CHILDREN_SQL = '''
+SELECT
+  (SELECT coalesce(json_agg(json_build_object(
+        'name', name, 'position', position) ORDER BY position), '[]'::json)
+     FROM members WHERE event_id = %(event_id)s) AS members,
+  (SELECT coalesce(json_agg(json_build_object(
+        'title', title, 'amount', amount, 'currency', currency,
+        'payer_name', payer_name, 'benefit_type', benefit_type,
+        'expense_date', expense_date, 'created_time', created_time,
+        'updated_time', updated_time, 'position', position) ORDER BY position), '[]'::json)
+     FROM expenses WHERE event_id = %(event_id)s) AS expenses,
+  (SELECT coalesce(json_agg(json_build_object(
+        'expense_position', x.position, 'member_name', b.member_name,
+        'position', b.position)), '[]'::json)
+     FROM expense_beneficiaries b
+     JOIN expenses x ON x.id = b.expense_id
+     WHERE x.event_id = %(event_id)s) AS expense_beneficiaries,
+  (SELECT coalesce(json_agg(json_build_object(
+        'member_name', member_name, 'bank', bank,
+        'account', account) ORDER BY member_name), '[]'::json)
+     FROM member_bank_info WHERE event_id = %(event_id)s) AS member_bank_info,
+  (SELECT coalesce(json_agg(json_build_object(
+        'client_id', client_id, 'label', label, 'primary_name', primary_name,
+        'position', position) ORDER BY position), '[]'::json)
+     FROM couples WHERE event_id = %(event_id)s) AS couples,
+  (SELECT coalesce(json_agg(json_build_object(
+        'couple_position', c.position, 'member_name', cm.member_name,
+        'position', cm.position)), '[]'::json)
+     FROM couple_members cm
+     JOIN couples c ON c.id = cm.couple_id
+     WHERE c.event_id = %(event_id)s) AS couple_members,
+  (SELECT coalesce(json_agg(json_build_object(
+        'currency_code', currency_code, 'rate', rate, 'source', source,
+        'rate_date', rate_date, 'rate_type', rate_type,
+        'currency_name', currency_name)), '[]'::json)
+     FROM event_rates WHERE event_id = %(event_id)s) AS event_rates
+'''
+
+
 def load_event_children(cursor, event_id):
     """Đọc dữ liệu con của event → phần document (không gồm title).
 
     cursor PHẢI là RealDictCursor. Nối beneficiaries/couple_members về
     *_position bằng JOIN vì tầng thuần không biết id DB.
     """
-    cursor.execute(
-        'SELECT name, position FROM members WHERE event_id = %s ORDER BY position',
-        (event_id,),
-    )
-    member_rows = cursor.fetchall()
-
-    cursor.execute(
-        '''SELECT title, amount, currency, payer_name, benefit_type,
-                  expense_date, created_time, updated_time, position
-           FROM expenses WHERE event_id = %s ORDER BY position''',
-        (event_id,),
-    )
-    expense_rows = cursor.fetchall()
-
-    cursor.execute(
-        '''SELECT x.position AS expense_position, b.member_name, b.position
-           FROM expense_beneficiaries b
-           JOIN expenses x ON x.id = b.expense_id
-           WHERE x.event_id = %s''',
-        (event_id,),
-    )
-    beneficiary_rows = cursor.fetchall()
-
-    cursor.execute(
-        'SELECT member_name, bank, account FROM member_bank_info WHERE event_id = %s ORDER BY member_name',
-        (event_id,),
-    )
-    bank_rows = cursor.fetchall()
-
-    cursor.execute(
-        '''SELECT client_id, label, primary_name, position
-           FROM couples WHERE event_id = %s ORDER BY position''',
-        (event_id,),
-    )
-    couple_rows = cursor.fetchall()
-
-    cursor.execute(
-        '''SELECT c.position AS couple_position, cm.member_name, cm.position
-           FROM couple_members cm
-           JOIN couples c ON c.id = cm.couple_id
-           WHERE c.event_id = %s''',
-        (event_id,),
-    )
-    couple_member_rows = cursor.fetchall()
-
-    cursor.execute(
-        '''SELECT currency_code, rate, source, rate_date, rate_type, currency_name
-           FROM event_rates WHERE event_id = %s''',
-        (event_id,),
-    )
-    rate_rows = cursor.fetchall()
-
-    return rows_to_document({
-        'members': member_rows,
-        'expenses': expense_rows,
-        'expense_beneficiaries': beneficiary_rows,
-        'member_bank_info': bank_rows,
-        'couples': couple_rows,
-        'couple_members': couple_member_rows,
-        'event_rates': rate_rows,
-    })
+    cursor.execute(_LOAD_CHILDREN_SQL, {'event_id': event_id})
+    return rows_to_document(cursor.fetchone())
 
 
 def load_events_summary(cursor, codes, viewer_user_id=None):
