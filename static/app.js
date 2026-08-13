@@ -357,16 +357,22 @@
         function renderBankInfoTable() {
             $('#bankInfoTableBody').empty();
 
+            // Tra option theo value qua Map dựng MỘT lần — không nội suy value vào
+            // selector (ký tự đặc biệt làm selector throw) và không quét lại toàn
+            // bộ option cho từng thành viên (O(members × options))
+            const bankByValue = new Map();
+            $('#bankInfoBank option').each(function () {
+                bankByValue.set($(this).val(), {
+                    text: $(this).text(),
+                    image: $(this).data('image'),
+                });
+            });
+
             members.forEach(member => {
                 const info = bankInfo[member] || {};
-                // So theo value bằng .filter() thay vì nội suy vào selector —
-                // giá trị chứa ký tự đặc biệt sẽ làm selector throw/vỡ render
-                const bankValue = info.bank || '';
-                const bankOption = $('#bankInfoBank option').filter(function () {
-                    return $(this).val() === bankValue;
-                }).first();
-                const bankName = bankOption.text() || '';
-                const bankLogo = bankOption.data('image') ? `<img src="${bankOption.data('image')}" style="height:16px;width:auto;vertical-align:middle;margin-right:8px;"/>` : '';
+                const bank = bankByValue.get(info.bank || '') || {};
+                const bankName = bank.text || '';
+                const bankLogo = bank.image ? `<img src="${bank.image}" style="height:16px;width:auto;vertical-align:middle;margin-right:8px;"/>` : '';
 
                 $('#bankInfoTableBody').append(`
                     <tr>
@@ -748,10 +754,13 @@
                             AppAuth.showLoginModal();
                         } else if (xhr.status === 403) {
                             // Server từ chối quyền (bị gỡ khỏi danh sách mời / chế độ
-                            // chia sẻ đổi) → chuyển giao diện về chế độ chỉ xem
+                            // chia sẻ đổi) → chuyển giao diện về chế độ chỉ xem.
+                            // Xóa cờ "chưa lưu được": thay đổi này vĩnh viễn không lưu
+                            // được nữa, giữ cờ thì beforeunload nag mãi không thoát được.
                             showToast('Bạn không có quyền chỉnh sửa sự kiện này — chuyển về chế độ chỉ xem.', 'error');
                             allowEdit = false;
                             updateUIForEditMode();
+                            setSaveStatus('');
                         } else if (xhr.status === 409) {
                             // Người khác vừa lưu bản mới hơn — không ghi đè,
                             // tải lại dữ liệu mới nhất (thay đổi local vừa rồi bị bỏ)
@@ -1652,7 +1661,11 @@
             try {
                 const codes = JSON.parse(localStorage.getItem('savedEventCodes') || '[]');
                 if (!Array.isArray(codes)) return [];
-                return codes.filter(code => typeof code === 'string');
+                // Mã toàn số có thể bị client cũ lưu thành number (kiểu coercion
+                // của jQuery .data()) — ép về chuỗi thay vì vứt bỏ
+                return codes
+                    .map(code => (typeof code === 'number' ? String(code) : code))
+                    .filter(code => typeof code === 'string' && code);
             } catch (e) {
                 return [];
             }
