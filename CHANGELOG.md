@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-08-13 — Người hưởng đích danh cho mọi khoản chi
+
+- Mọi khoản chi giờ lưu rõ chia cho những ai — không còn kiểu "Tất cả" tự động chia
+  lại khi nhóm thay đổi. Chọn "Tất cả" khi nhập chỉ là cách tick nhanh đủ mọi
+  người tại thời điểm đó.
+- Thêm thành viên mới: app hỏi có chia thêm người đó vào các khoản đang chia
+  cho đủ mọi người không (mặc định KHÔNG — đóng hộp thoại là không đụng gì).
+- Xóa thành viên: tự gỡ tên khỏi các khoản chi kèm xác nhận; chặn nếu là người
+  thanh toán hoặc người hưởng duy nhất của một khoản.
+- Dữ liệu cũ kiểu "Tất cả" được chuyển theo danh sách lúc tạo khoản chi
+  (script dọn một lần trên DB).
+- Danh sách chi phí + xuất Excel luôn hiện tên người hưởng cụ thể.
+
 ## 2026-08-13 — Hỏi trước khi chia khoản "Tất cả" cho thành viên mới
 
 - Khi thêm thành viên mà sự kiện đang có khoản chi chia cho "Tất cả", app hỏi

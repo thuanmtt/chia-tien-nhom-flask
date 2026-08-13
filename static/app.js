@@ -789,8 +789,10 @@
                         rates = (eventData.rates && typeof eventData.rates === 'object') ? eventData.rates : {};
                         renderCurrencyDropdown();
 
-                        // Cập nhật chi phí
+                        // Cập nhật chi phí — chuẩn hóa dữ liệu 'all' cũ thành
+                        // danh sách đích danh (ghi xuống DB ở lần lưu kế tiếp)
                         expenses = eventData.expenses || [];
+                        SplitLogic.normalizeExpenses(expenses, members);
                         editingExpenseIndex = null;
                         $('#expenseSubmitBtn').text('Thêm Chi Phí');
                         $('#cancelEditExpenseBtn').addClass('d-none');
@@ -906,12 +908,7 @@
             return list.filter(exp => {
                 if (q && !normalizeViet(exp.title).includes(q)) return false;
                 if (payer && exp.payer !== payer) return false;
-                if (benef) {
-                    // Đồng bộ với getExpenseBeneficiaries: không phải 'selected' = cho tất cả
-                    const isAll = exp.benefitType !== 'selected';
-                    const inList = (exp.beneficiaries || []).includes(benef);
-                    if (!isAll && !inList) return false;
-                }
+                if (benef && !getExpenseBeneficiaries(exp).includes(benef)) return false;
                 if (fromStr || toStr) {
                     const dateStr = getExpenseDateKey(exp, dateField);
                     if (!dateStr) return false;
@@ -1110,14 +1107,8 @@
                 const stt = sortOrder === 'newest' ? sorted.length - displayIndex : displayIndex + 1;
                 const cur = getCurrencyOfExpense(e);
                 const vnd = amountInVND(e);
-                let beneficiaries;
-                if (e.benefitType === 'all') {
-                    beneficiaries = 'Tất cả';
-                } else if (e.beneficiaries && e.beneficiaries.length) {
-                    beneficiaries = e.beneficiaries.join(', ');
-                } else {
-                    beneficiaries = '';
-                }
+                // Luôn ghi tên đích danh (danh sách thực tế sau lọc/fallback)
+                const beneficiaries = getExpenseBeneficiaries(e).join(', ');
                 return {
                     stt,
                     title: e.title || '',
@@ -1455,19 +1446,15 @@
                 const stt = sortOrder === 'newest'
                     ? expenses.length - displayIndex
                     : displayIndex + 1;
+                // Luôn nêu tên đích danh — không còn nhãn "tất cả" ẩn danh
                 let benefitInfo = '';
-                if (expense.benefitType === 'all') {
-                    benefitInfo = 'cho tất cả mọi người';
-                } else if (expense.beneficiaries && expense.beneficiaries.length > 0) {
-                    if (expense.beneficiaries.length === 1) {
-                        benefitInfo = `chỉ cho ${expense.beneficiaries[0]}`;
-                    } else if (expense.beneficiaries.length === 2) {
-                        benefitInfo = `cho ${expense.beneficiaries.join(' và ')}`;
-                    } else if (expense.beneficiaries.length < members.length) {
-                        benefitInfo = `cho ${expense.beneficiaries.length} người: (${expense.beneficiaries.join(', ')})`;
-                    } else {
-                        benefitInfo = 'cho tất cả mọi người';
-                    }
+                const bens = getExpenseBeneficiaries(expense);
+                if (bens.length === 1) {
+                    benefitInfo = `chỉ cho ${bens[0]}`;
+                } else if (bens.length === 2) {
+                    benefitInfo = `cho ${bens.join(' và ')}`;
+                } else if (bens.length > 2) {
+                    benefitInfo = `cho ${bens.length} người: (${bens.join(', ')})`;
                 }
 
                 const expCurrency = getCurrencyOfExpense(expense);
@@ -1910,8 +1897,8 @@
                 if (members.includes(memberName)) {
                     showToast('Thành viên này đã được thêm vào danh sách!', 'warning');
                 } else {
-                    // Chốt danh sách CŨ trước khi thêm — dùng nếu người dùng chọn
-                    // không chia các khoản "Tất cả" cho người mới
+                    // Danh sách CŨ trước khi thêm — để nhận diện các khoản
+                    // đang chia cho đủ mọi người
                     const prevMembers = members.slice();
                     members.push(memberName);
                     renderMembers();
@@ -1922,24 +1909,24 @@
                     showToast(`Đã thêm thành viên "${memberName}"!`, 'success');
                     // Không cần gọi autoCalculate() vì đã được gọi trong renderMembers()
 
-                    // Các khoản "Tất cả" chia động theo danh sách hiện tại nên
-                    // người mới mặc định được tính vào — hỏi để người dùng quyết;
-                    // chọn "Không chia" thì chốt các khoản đó cho danh sách cũ.
-                    // Đóng hộp thoại (Hủy/ESC) = giữ hành vi cũ: chia cho người mới.
-                    const allCount = expenses.filter(e => e && e.benefitType !== 'selected').length;
-                    if (allCount > 0 && prevMembers.length > 0) {
+                    // Mọi khoản chi lưu người hưởng đích danh — người mới KHÔNG
+                    // tự được chia vào khoản cũ. Nếu có khoản đang chia cho đủ
+                    // thành viên cũ thì hỏi có chia thêm không; đóng hộp thoại
+                    // (Hủy/ESC) = không đụng gì.
+                    const fullCount = SplitLogic.countFullCoverage(expenses, prevMembers);
+                    if (fullCount > 0) {
                         showConfirm(
-                            `Đang có ${allCount} khoản chi chia cho "Tất cả". Có chia các khoản này cho "${memberName}" nữa không?`,
+                            `Có ${fullCount} khoản chi đang chia cho đủ mọi người. Chia thêm cho "${memberName}" không?`,
                             function () {
-                                SplitLogic.freezeAllExpenses(expenses, prevMembers);
+                                const added = SplitLogic.addBeneficiaryToFullCoverage(expenses, prevMembers, memberName);
                                 renderExpenses(); // đã gọi autoCalculate() bên trong
                                 saveEvent(false);
-                                showToast(`Đã giữ ${allCount} khoản chi cho ${prevMembers.length} thành viên cũ — "${memberName}" không bị tính vào các khoản đó.`, 'success');
+                                showToast(`Đã chia thêm ${added} khoản chi cho "${memberName}".`, 'success');
                             },
                             {
-                                okLabel: 'Không chia',
+                                okLabel: `Có, chia cho "${memberName}"`,
                                 okClass: 'btn-primary',
-                                cancelLabel: `Có, chia cho "${memberName}"`,
+                                cancelLabel: 'Không',
                             }
                         );
                     }
@@ -1952,38 +1939,65 @@
         // Xử lý xóa thành viên
         $(document).on('click', '.member-close', function () {
             if (!allowEdit) return; // Không cho phép xóa nếu ở chế độ chỉ xem
-            
+
             const index = $(this).data('index');
             const memberToRemove = members[index];
 
-            // Kiểm tra xem thành viên có chi phí nào không
-            const hasExpenses = expenses.some(expense => expense.payer === memberToRemove);
-
-            // Chỉ chặn nếu là người hưởng ĐÍCH DANH ('selected'); các khoản
-            // "cho tất cả" tự chia lại theo danh sách thành viên hiện tại
-            const isBeneficiary = expenses.some(expense => expense.benefitType === 'selected'
-                && expense.beneficiaries && expense.beneficiaries.includes(memberToRemove));
-
-            if (hasExpenses || isBeneficiary) {
-                showToast('Không thể xóa thành viên này vì họ đã có chi phí trong danh sách. Vui lòng xóa chi phí trước!', 'error');
+            // Người thanh toán của khoản nào đó → phải xử lý khoản chi trước
+            if (expenses.some(expense => expense.payer === memberToRemove)) {
+                showToast('Không thể xóa thành viên này vì họ là người thanh toán của chi phí trong danh sách. Vui lòng xóa/sửa chi phí trước!', 'error');
                 return;
             }
 
-            members.splice(index, 1);
+            // Người hưởng DUY NHẤT của khoản nào đó → xóa làm khoản chi mất nghĩa
+            const soleTitles = expenses
+                .filter(expense => {
+                    const bens = getExpenseBeneficiaries(expense);
+                    return bens.length === 1 && bens[0] === memberToRemove;
+                })
+                .map(expense => expense.title || '(không tên)');
+            if (soleTitles.length > 0) {
+                showToast(`Không thể xóa "${memberToRemove}" — là người hưởng duy nhất của: ${soleTitles.join(', ')}. Vui lòng sửa/xóa các khoản đó trước!`, 'error');
+                return;
+            }
 
-            // Dọn khỏi các nhóm chung quỹ
-            couples = (couples || []).map(c => {
-                const remaining = (c.members || []).filter(m => m !== memberToRemove);
-                const primary = remaining.includes(c.primary) ? c.primary : (remaining[0] || '');
-                return { ...c, members: remaining, primary };
-            }).filter(c => c.members.length >= 2);
+            const benefitCount = expenses.filter(expense =>
+                Array.isArray(expense.beneficiaries) && expense.beneficiaries.includes(memberToRemove)).length;
 
-            renderMembers();
+            const doRemove = function () {
+                // Gỡ tên khỏi danh sách người hưởng của mọi khoản chi
+                expenses.forEach(expense => {
+                    if (Array.isArray(expense.beneficiaries)) {
+                        expense.beneficiaries = expense.beneficiaries.filter(m => m !== memberToRemove);
+                    }
+                });
 
-            // Tự động lưu sau khi xóa thành viên
-            saveEvent(false);
-            showToast(`Đã xoá thành viên "${memberToRemove}"!`, 'success');
-            // Không cần gọi autoCalculate() vì đã được gọi trong renderMembers()
+                // index chụp trước khi showConfirm mở có thể ôi (mảng members đổi do
+                // reload nền) — tra lại theo tên thay vì dùng index cũ.
+                const idx = members.indexOf(memberToRemove);
+                if (idx === -1) return;
+                members.splice(idx, 1);
+
+                // Dọn khỏi các nhóm chung quỹ
+                couples = (couples || []).map(c => {
+                    const remaining = (c.members || []).filter(m => m !== memberToRemove);
+                    const primary = remaining.includes(c.primary) ? c.primary : (remaining[0] || '');
+                    return { ...c, members: remaining, primary };
+                }).filter(c => c.members.length >= 2);
+
+                renderMembers();
+                renderExpenses(); // cập nhật cột người hưởng + autoCalculate
+
+                // Tự động lưu sau khi xóa thành viên
+                saveEvent(false);
+                showToast(`Đã xoá thành viên "${memberToRemove}"!`, 'success');
+            };
+
+            if (benefitCount > 0) {
+                showConfirm(`Gỡ "${memberToRemove}" khỏi ${benefitCount} khoản chi và xóa khỏi nhóm?`, doRemove, { okLabel: 'Gỡ và xóa' });
+            } else {
+                doRemove();
+            }
         });
 
         // Xử lý thêm chi phí
@@ -2052,7 +2066,9 @@
                 amount: amount,
                 currency: currency,
                 payer: payer,
-                benefitType: benefitType,
+                // Luôn lưu đích danh; chọn "Tất cả" trên form chỉ là shortcut
+                // chốt đủ thành viên tại thời điểm lưu
+                benefitType: 'selected',
                 beneficiaries: beneficiaries,
                 expense_date: expenseDate,
                 created_time: createdTime,
@@ -3104,6 +3120,9 @@
             $('#expenseTitle').val('');
             $('#expenseAmount').val('');
             resetExpenseDateInput();
+            // Reset dropdown người hưởng — khoản MỚI tiếp theo mặc định "Tất cả",
+            // tránh thừa hưởng 'selected' + tick của khoản vừa sửa xong.
+            $('#benefitType').val('all').trigger('change');
             updateAmountPreview();
             renderExpenses();
         }
@@ -3122,7 +3141,8 @@
             $('#expenseTitle').val(expense.title);
             $('#expenseAmount').val(expense.amount);
             $('#expensePayer').val(expense.payer);
-            $('#benefitType').val(expense.benefitType || 'all').trigger('change');
+            // Dữ liệu đã chuẩn hóa — form sửa luôn ở chế độ chọn đích danh
+            $('#benefitType').val('selected').trigger('change');
             const curEdit = getCurrencyOfExpense(expense);
             if ($('#expenseCurrency').find('option').filter(function () { return this.value === curEdit; }).length === 0) {
                 $('#expenseCurrency').append($('<option>').val(curEdit).text(curEdit));
@@ -3146,15 +3166,13 @@
             // Cập nhật preview sau khi set giá trị
             updateAmountPreview();
 
-            // Nếu là chi tiêu cho một số người, chọn lại các checkbox
-            if (expense.benefitType === 'selected' && Array.isArray(expense.beneficiaries)) {
-                // Bỏ trạng thái cũ trước, rồi tick theo value (an toàn với tên có dấu/khoảng trắng)
-                $('#beneficiariesList .beneficiary-checkbox').prop('checked', false);
-                const wanted = new Set(expense.beneficiaries);
-                $('#beneficiariesList .beneficiary-checkbox').each(function () {
-                    if (wanted.has(this.value)) this.checked = true;
-                });
-            }
+            // Tick theo danh sách hưởng thực tế (đã lọc + fallback)
+            // — an toàn với tên có dấu/khoảng trắng nhờ so theo value
+            $('#beneficiariesList .beneficiary-checkbox').prop('checked', false);
+            const wanted = new Set(getExpenseBeneficiaries(expense));
+            $('#beneficiariesList .beneficiary-checkbox').each(function () {
+                if (wanted.has(this.value)) this.checked = true;
+            });
 
             // Bật edit mode: giữ nguyên expense trong mảng, chỉ đánh dấu index đang sửa
             editingExpenseIndex = index;

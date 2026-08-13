@@ -27,31 +27,57 @@
         return amt * rate;
     }
 
-    // Người hưởng của một chi phí:
-    // - 'all' (hoặc thiếu benefitType): LUÔN là danh sách thành viên HIỆN TẠI,
-    //   không dùng snapshot lúc tạo — để thành viên thêm sau vẫn được chia
-    //   vào các khoản "cho tất cả" đúng như UI hiển thị
-    // - 'selected': danh sách đã chọn, lọc theo thành viên còn tồn tại
+    // Người hưởng của một chi phí: LUÔN là danh sách beneficiaries đã lưu
+    // (lọc theo thành viên còn tồn tại), bất kể benefitType — khoản 'all'
+    // legacy được hiểu theo snapshot lúc tạo. Chỉ fallback về danh sách
+    // thành viên hiện tại khi thiếu/rỗng/toàn tên đã xóa (dữ liệu tay/cũ).
     function getExpenseBeneficiaries(expense, members) {
-        if (expense && expense.benefitType === 'selected'
-            && Array.isArray(expense.beneficiaries) && expense.beneficiaries.length > 0) {
+        if (expense && Array.isArray(expense.beneficiaries) && expense.beneficiaries.length > 0) {
             const valid = expense.beneficiaries.filter(m => members.includes(m));
             if (valid.length > 0) return valid;
         }
         return members;
     }
 
-    // "Chốt" các khoản đang chia cho tất cả (benefitType khác 'selected') thành
-    // 'selected' với danh sách members đưa vào — dùng khi thêm thành viên mới mà
-    // người dùng chọn KHÔNG chia các khoản cũ cho người mới. Sửa trực tiếp trên
-    // mảng expenses; trả về số khoản đã chốt.
-    function freezeAllExpenses(expenses, members) {
+    // Chuẩn hóa khi tải event: mọi khoản không-'selected' (dữ liệu 'all' cũ)
+    // → 'selected' với snapshot đã lưu (lọc tên còn tồn tại; rỗng thì lấy
+    // danh sách hiện tại). Sửa tại chỗ, trả về số khoản đã chuyển.
+    function normalizeExpenses(expenses, members) {
         let count = 0;
         (expenses || []).forEach(e => {
             if (!e || e.benefitType === 'selected') return;
+            const stored = Array.isArray(e.beneficiaries)
+                ? e.beneficiaries.filter(m => (members || []).includes(m))
+                : [];
             e.benefitType = 'selected';
-            e.beneficiaries = (members || []).slice();
+            e.beneficiaries = stored.length > 0 ? stored : (members || []).slice();
             count++;
+        });
+        return count;
+    }
+
+    // Khoản chi "phủ đủ" prevMembers = danh sách người hưởng chứa mọi tên
+    // trong prevMembers (các khoản đang chia cho đủ mọi người cũ)
+    function _coversAll(expense, prevMembers) {
+        if (!prevMembers || prevMembers.length === 0) return false;
+        const bens = (expense && Array.isArray(expense.beneficiaries)) ? expense.beneficiaries : [];
+        return prevMembers.every(m => bens.includes(m));
+    }
+
+    function countFullCoverage(expenses, prevMembers) {
+        return (expenses || []).filter(e => _coversAll(e, prevMembers)).length;
+    }
+
+    // Thêm newMember vào các khoản phủ đủ prevMembers (dùng khi người dùng
+    // đồng ý chia các khoản "cho đủ mọi người" cho thành viên mới)
+    function addBeneficiaryToFullCoverage(expenses, prevMembers, newMember) {
+        let count = 0;
+        (expenses || []).forEach(e => {
+            if (!_coversAll(e, prevMembers)) return;
+            if (!e.beneficiaries.includes(newMember)) {
+                e.beneficiaries.push(newMember);
+                count++;
+            }
         });
         return count;
     }
@@ -200,7 +226,9 @@
         getRateToVND: getRateToVND,
         amountInVND: amountInVND,
         getExpenseBeneficiaries: getExpenseBeneficiaries,
-        freezeAllExpenses: freezeAllExpenses,
+        normalizeExpenses: normalizeExpenses,
+        countFullCoverage: countFullCoverage,
+        addBeneficiaryToFullCoverage: addBeneficiaryToFullCoverage,
         getValidCouplesForMembers: getValidCouplesForMembers,
         computeSplit: computeSplit,
     };

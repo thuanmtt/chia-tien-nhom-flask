@@ -72,16 +72,38 @@ test('nhiều khoản chia lẻ: mọi giao dịch vẫn tất toán chính xác
     assertTransfersSettle(r);
 });
 
-test("benefitType 'all' dùng danh sách thành viên HIỆN TẠI, không dùng snapshot", () => {
-    // Chi phí tạo lúc chỉ có A, B (beneficiaries snapshot cũ) — sau đó thêm C
+test("khoản chi có snapshot beneficiaries: dùng snapshot, bất kể benefitType 'all'", () => {
+    // Chi phí tạo lúc chỉ có A, B (snapshot đã lưu) — C vào nhóm sau
     const r = S.computeSplit({
         members: ['A', 'B', 'C'],
         expenses: [{ title: 'ăn', amount: 90000, payer: 'A', benefitType: 'all', beneficiaries: ['A', 'B'] }],
     });
-    // C cũng phải chia: mỗi người 30000 → B và C mỗi người chuyển A 30000
-    assert.strictEqual(r.roundedBalances['C'], -30000);
-    assert.strictEqual(r.transfers.length, 2);
+    // C KHÔNG bị chia: chỉ B nợ A 45000
+    assert.strictEqual(r.roundedBalances['C'], 0);
+    assert.deepStrictEqual(r.transfers, [{ from: 'B', to: 'A', amount: 45000 }]);
     assertTransfersSettle(r);
+});
+
+test('khoản chi KHÔNG có snapshot (thiếu/rỗng): fallback danh sách hiện tại', () => {
+    const r = S.computeSplit({
+        members: ['A', 'B', 'C'],
+        expenses: [
+            { title: 'x', amount: 30000, payer: 'A', benefitType: 'all' },
+            { title: 'y', amount: 30000, payer: 'A', benefitType: 'all', beneficiaries: [] },
+        ],
+    });
+    // Cả 2 khoản chia đều 3 người: B và C mỗi người nợ A 20000
+    assert.strictEqual(r.roundedBalances['B'], -20000);
+    assert.strictEqual(r.roundedBalances['C'], -20000);
+    assertTransfersSettle(r);
+});
+
+test('snapshot toàn tên đã xóa: fallback danh sách hiện tại', () => {
+    const r = S.computeSplit({
+        members: ['A', 'B'],
+        expenses: [{ title: 'cũ', amount: 60000, payer: 'A', benefitType: 'all', beneficiaries: ['X', 'Y'] }],
+    });
+    assert.deepStrictEqual(r.transfers, [{ from: 'B', to: 'A', amount: 30000 }]);
 });
 
 test("benefitType 'selected' chỉ chia cho người được chọn còn tồn tại", () => {
@@ -194,36 +216,40 @@ test('fuzz nhẹ: 50 bộ dữ liệu ngẫu nhiên-xác-định luôn tất to�
     }
 });
 
-test("freezeAllExpenses: chốt các khoản 'tất cả' thành 'selected' theo danh sách đưa vào", () => {
+test('normalizeExpenses: chuyển khoản không-selected thành selected theo snapshot, lọc tên chết', () => {
     const expenses = [
-        { title: 'ăn', amount: 90000, payer: 'A', benefitType: 'all', beneficiaries: ['A', 'B', 'C'] },
-        { title: 'xe', amount: 30000, payer: 'B' }, // thiếu benefitType = 'all'
-        { title: 'taxi', amount: 60000, payer: 'C', benefitType: 'selected', beneficiaries: ['A', 'B'] },
+        { title: 'a', amount: 1, payer: 'A', benefitType: 'all', beneficiaries: ['A', 'B', 'Đã Xóa'] },
+        { title: 'b', amount: 1, payer: 'B' }, // thiếu benefitType, không snapshot
+        { title: 'c', amount: 1, payer: 'C', benefitType: 'selected', beneficiaries: ['C'] },
     ];
-    const count = S.freezeAllExpenses(expenses, ['A', 'B', 'C']);
-    assert.strictEqual(count, 2, 'phải chốt đúng 2 khoản đang chia cho tất cả');
+    const members = ['A', 'B', 'C'];
+    const count = S.normalizeExpenses(expenses, members);
+    assert.strictEqual(count, 2);
     assert.strictEqual(expenses[0].benefitType, 'selected');
-    assert.deepStrictEqual(expenses[0].beneficiaries, ['A', 'B', 'C']);
+    assert.deepStrictEqual(expenses[0].beneficiaries, ['A', 'B']); // lọc 'Đã Xóa'
     assert.strictEqual(expenses[1].benefitType, 'selected');
+    assert.deepStrictEqual(expenses[1].beneficiaries, ['A', 'B', 'C']); // fallback
+    // Copy, không giữ tham chiếu mảng members
+    members.push('D');
     assert.deepStrictEqual(expenses[1].beneficiaries, ['A', 'B', 'C']);
-    // Khoản 'selected' sẵn có: giữ nguyên, không đụng vào
-    assert.strictEqual(expenses[2].benefitType, 'selected');
-    assert.deepStrictEqual(expenses[2].beneficiaries, ['A', 'B']);
+    // Khoản 'selected' sẵn có: không đụng
+    assert.deepStrictEqual(expenses[2].beneficiaries, ['C']);
 });
 
-test('freezeAllExpenses: thêm thành viên mới sau khi chốt — kết quả khoản cũ không đổi', () => {
-    const members = ['A', 'B', 'C'];
-    const expenses = [{ title: 'ăn', amount: 90000, payer: 'A', benefitType: 'all' }];
-    S.freezeAllExpenses(expenses, members);
-    // Cùng MỘT mảng members được push thêm người — helper phải copy snapshot,
-    // không giữ tham chiếu
-    members.push('D');
-    const r = S.computeSplit({ members, expenses });
-    // D vào sau, KHÔNG bị chia vào khoản đã chốt: A/B/C vẫn 30000 mỗi người
-    assert.strictEqual(r.roundedBalances['D'], 0);
-    assert.strictEqual(r.memberInfo['B'].needToPay, 30000);
-    assert.strictEqual(r.memberInfo['D'].needToPay, 0);
-    assertTransfersSettle(r);
+test('countFullCoverage/addBeneficiaryToFullCoverage: chỉ khoản phủ đủ thành viên cũ', () => {
+    const expenses = [
+        { title: 'chung', amount: 1, payer: 'A', benefitType: 'selected', beneficiaries: ['A', 'B'] },
+        { title: 'riêng', amount: 1, payer: 'A', benefitType: 'selected', beneficiaries: ['A'] },
+        { title: 'đã có', amount: 1, payer: 'B', benefitType: 'selected', beneficiaries: ['A', 'B', 'C'] },
+    ];
+    const prev = ['A', 'B'];
+    assert.strictEqual(S.countFullCoverage(expenses, prev), 2); // 'chung' và 'đã có'
+    const added = S.addBeneficiaryToFullCoverage(expenses, prev, 'C');
+    assert.strictEqual(added, 1); // 'đã có' đã chứa C nên không thêm lại
+    assert.deepStrictEqual(expenses[0].beneficiaries, ['A', 'B', 'C']);
+    assert.deepStrictEqual(expenses[1].beneficiaries, ['A']); // khoản riêng không đụng
+    assert.deepStrictEqual(expenses[2].beneficiaries, ['A', 'B', 'C']); // không trùng
+    assert.strictEqual(S.countFullCoverage(expenses, []), 0); // prevMembers rỗng → 0
 });
 
 console.log(`\n${passed} test passed${process.exitCode ? ' (CÓ TEST FAIL)' : ' — tất cả OK'}`);
