@@ -71,6 +71,32 @@
         return count;
     }
 
+    // Khoản chi "phủ đủ" prevMembers = danh sách người hưởng chứa mọi tên
+    // trong prevMembers (các khoản đang chia cho đủ mọi người cũ)
+    function _coversAll(expense, prevMembers) {
+        if (!prevMembers || prevMembers.length === 0) return false;
+        const bens = (expense && Array.isArray(expense.beneficiaries)) ? expense.beneficiaries : [];
+        return prevMembers.every(m => bens.includes(m));
+    }
+
+    function countFullCoverage(expenses, prevMembers) {
+        return (expenses || []).filter(e => _coversAll(e, prevMembers)).length;
+    }
+
+    // Thêm newMember vào các khoản phủ đủ prevMembers (dùng khi người dùng
+    // đồng ý chia các khoản "cho đủ mọi người" cho thành viên mới)
+    function addBeneficiaryToFullCoverage(expenses, prevMembers, newMember) {
+        let count = 0;
+        (expenses || []).forEach(e => {
+            if (!_coversAll(e, prevMembers)) return;
+            if (!e.beneficiaries.includes(newMember)) {
+                e.beneficiaries.push(newMember);
+                count++;
+            }
+        });
+        return count;
+    }
+
     // Trả về map: memberName -> couple object (chỉ các nhóm hợp lệ: >=2 thành viên thực sự tồn tại)
     function getValidCouplesForMembers(currentMembers, coupleList) {
         const result = { byMember: {}, list: [] };
@@ -217,6 +243,8 @@
         getExpenseBeneficiaries: getExpenseBeneficiaries,
         freezeAllExpenses: freezeAllExpenses,
         normalizeExpenses: normalizeExpenses,
+        countFullCoverage: countFullCoverage,
+        addBeneficiaryToFullCoverage: addBeneficiaryToFullCoverage,
         getValidCouplesForMembers: getValidCouplesForMembers,
         computeSplit: computeSplit,
     };

@@ -268,4 +268,20 @@ test('normalizeExpenses: chuyển khoản không-selected thành selected theo s
     assert.deepStrictEqual(expenses[2].beneficiaries, ['C']);
 });
 
+test('countFullCoverage/addBeneficiaryToFullCoverage: chỉ khoản phủ đủ thành viên cũ', () => {
+    const expenses = [
+        { title: 'chung', amount: 1, payer: 'A', benefitType: 'selected', beneficiaries: ['A', 'B'] },
+        { title: 'riêng', amount: 1, payer: 'A', benefitType: 'selected', beneficiaries: ['A'] },
+        { title: 'đã có', amount: 1, payer: 'B', benefitType: 'selected', beneficiaries: ['A', 'B', 'C'] },
+    ];
+    const prev = ['A', 'B'];
+    assert.strictEqual(S.countFullCoverage(expenses, prev), 2); // 'chung' và 'đã có'
+    const added = S.addBeneficiaryToFullCoverage(expenses, prev, 'C');
+    assert.strictEqual(added, 1); // 'đã có' đã chứa C nên không thêm lại
+    assert.deepStrictEqual(expenses[0].beneficiaries, ['A', 'B', 'C']);
+    assert.deepStrictEqual(expenses[1].beneficiaries, ['A']); // khoản riêng không đụng
+    assert.deepStrictEqual(expenses[2].beneficiaries, ['A', 'B', 'C']); // không trùng
+    assert.strictEqual(S.countFullCoverage(expenses, []), 0); // prevMembers rỗng → 0
+});
+
 console.log(`\n${passed} test passed${process.exitCode ? ' (CÓ TEST FAIL)' : ' — tất cả OK'}`);
