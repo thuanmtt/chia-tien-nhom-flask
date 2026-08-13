@@ -23,18 +23,28 @@
             border-color: #4d5aa7;
         }
 
-        .member-pill {
-            border-radius: 20px;
-            padding: 5px 10px;
-            margin: 5px;
-            display: inline-block;
-            background-color: #e9ecef;
+        #membersList {
+            gap: 8px;
         }
 
-        .member-close {
-            margin-left: 5px;
-            cursor: pointer;
-            color: #6c757d;
+        .member-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            border-radius: 999px;
+            padding: 6px 12px;
+            margin: 0;
+            background-color: #fff;
+            border: 1px solid #e2e6ec;
+            box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+            font-weight: 500;
+            font-size: 0.9rem;
+            color: #343a40;
+            transition: border-color 0.15s;
+        }
+
+        .member-pill:hover {
+            border-color: #b9c2e8;
         }
 
         /* .member-close / .action-btn giờ là <button> (a11y) — bỏ style mặc
@@ -45,6 +55,25 @@
             border: 0;
             padding: 0;
             font: inherit;
+        }
+
+        .member-close {
+            cursor: pointer;
+            color: #98a2b3;
+            width: 20px;
+            height: 20px;
+            margin-left: 2px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            font-size: 0.75rem;
+            transition: background-color 0.15s, color 0.15s;
+        }
+
+        .member-close:hover {
+            background-color: #fdecec;
+            color: #d64545;
         }
 
         .expense-item {
@@ -140,29 +169,104 @@
             display: flex !important;
             align-items: center;
         }
+    /* --- Header nhóm (tiêu đề + mã event + hàng nút) --- */
+    .group-header {
+        padding: 14px 16px;
+    }
+    .group-header-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        flex-wrap: wrap;
+        gap: 10px 16px;
+    }
+    .group-title {
+        font-weight: 600;
+    }
+    #eventTitle {
+        border-radius: 6px;
+        padding: 1px 4px;
+        margin-left: -4px;
+    }
+    #eventTitle:focus {
+        outline: 2px solid #b9c2e8;
+        background: #f6f7fd;
+    }
+    .group-meta {
+        margin-top: 6px;
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        row-gap: 4px;
+        min-height: 1.4em;
+    }
+    /* Mã event hiển thị như một "chip" monospace, dễ nhận ra để copy */
+    #eventCodeDisplay:not(:empty) {
+        font-family: SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.75rem;
+        letter-spacing: 0.5px;
+        background: #f1f3f5;
+        border: 1px solid #e6e9ed;
+        border-radius: 6px;
+        padding: 2px 8px;
+    }
+    .group-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+    }
+    /* Nút hành động trên header: một kiểu trung tính thống nhất, icon mang màu brand */
+    .btn-header-action {
+        background: #fff;
+        border: 1px solid #dbe0e8;
+        color: #495057;
+        font-weight: 500;
+        border-radius: 8px;
+    }
+    .btn-header-action i {
+        color: #5c6bc0;
+    }
+    .btn-header-action:hover,
+    .btn-header-action:focus {
+        background: #f6f7fd;
+        border-color: #5c6bc0;
+        color: #3f4b9e;
+    }
+    /* Chia sẻ là hành động chính → nút đặc màu brand */
+    .btn-header-share {
+        background: #5c6bc0;
+        border: 1px solid #5c6bc0;
+        color: #fff;
+        font-weight: 500;
+        border-radius: 8px;
+    }
+    .btn-header-share:hover,
+    .btn-header-share:focus {
+        background: #4d5aa7;
+        border-color: #4d5aa7;
+        color: #fff;
+    }
+    .section-title {
+        font-weight: 600;
+        color: #343a40;
+    }
+    .section-title i {
+        color: #5c6bc0;
+    }
     /* --- Responsive cho phần header nhóm --- */
     @media (max-width: 576px) {
-        .group-header .d-flex {
-            flex-direction: column !important;
-            align-items: flex-start !important;
-        }
-        .group-title {
-            width: 100%;
-            margin-bottom: 10px;
+        .group-header-row {
+            flex-direction: column;
+            align-items: stretch;
         }
         .group-actions {
-            width: 100%;
-            display: flex;
-            flex-direction: row;
-            flex-wrap: wrap;
             gap: 6px;
-            justify-content: flex-start;
         }
         .group-actions .btn {
-            flex: 1 1 100px;
+            flex: 1 1 calc(50% - 6px);
             min-width: 0;
-            font-size: 0.95rem;
-            padding: 4px 6px;
+            padding: 5px 6px;
         }
     }
 
