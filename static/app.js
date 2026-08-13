@@ -789,8 +789,10 @@
                         rates = (eventData.rates && typeof eventData.rates === 'object') ? eventData.rates : {};
                         renderCurrencyDropdown();
 
-                        // Cập nhật chi phí
+                        // Cập nhật chi phí — chuẩn hóa dữ liệu 'all' cũ thành
+                        // danh sách đích danh (ghi xuống DB ở lần lưu kế tiếp)
                         expenses = eventData.expenses || [];
+                        SplitLogic.normalizeExpenses(expenses, members);
                         editingExpenseIndex = null;
                         $('#expenseSubmitBtn').text('Thêm Chi Phí');
                         $('#cancelEditExpenseBtn').addClass('d-none');
@@ -2052,7 +2054,9 @@
                 amount: amount,
                 currency: currency,
                 payer: payer,
-                benefitType: benefitType,
+                // Luôn lưu đích danh; chọn "Tất cả" trên form chỉ là shortcut
+                // chốt đủ thành viên tại thời điểm lưu
+                benefitType: 'selected',
                 beneficiaries: beneficiaries,
                 expense_date: expenseDate,
                 created_time: createdTime,
