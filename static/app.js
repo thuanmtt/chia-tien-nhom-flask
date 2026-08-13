@@ -37,6 +37,7 @@
         let shareAccess = 'link';
         let shareRole = 'viewer';
         let isOwner = false;    // chủ sở hữu event hiện tại (quản lý người được mời)
+        let isSavedEvent = false; // user đang "theo dõi" (đã lưu) event hiện tại
 
         // Escape HTML để chống XSS khi render dữ liệu người dùng
         // (tên thành viên, tiêu đề chi phí, tên sự kiện, tên nhóm...)
@@ -600,6 +601,8 @@
             shareAccess = 'link';   // mặc định: bất kỳ ai có đường liên kết
             shareRole = 'viewer';   // với vai trò Người xem
             isOwner = true;     // sự kiện mới do chính mình tạo
+            isSavedEvent = false;
+            updateFollowButton(); // currentEventCode=null → ẩn nút
             setSaveStatus('');
             $('#eventTitle').text('Sự Kiện Mới');
             $('#eventCodeDisplay').text('');
@@ -786,7 +789,6 @@
                             currentEventCode = response.event_code;
                             localStorage.setItem('currentEventCode', currentEventCode);
                             $('#eventCodeDisplay').text(currentEventCode);
-                            rememberEvent(currentEventCode); // Thêm vào "Sự Kiện Của Tôi"
                             lastKnownUpdatedAt = response.updated_at || null;
                             isOwner = true; // người tạo là chủ sở hữu
                             setSaveStatus('saved');
@@ -879,11 +881,18 @@
                     bankInfo = eventData.bankInfo || {};
 
                     // Chỉ lưu event_code vào localStorage khi ở chế độ cho phép chỉnh sửa,
-                    // để tránh trường hợp mở link chỉ-xem rồi quay lại "/" vẫn vào được chế độ sửa
+                    // để tránh trường hợp mở link chỉ-xem rồi quay lại "/" vẫn vào được chế độ sửa.
+                    // KHÔNG auto-lưu vào "Sự Kiện Của Tôi" — người dùng chủ động bấm Theo dõi.
                     if (allowEdit) {
                         localStorage.setItem('currentEventCode', currentEventCode);
-                        rememberEvent(currentEventCode); // Thêm vào "Sự Kiện Của Tôi"
                     }
+
+                    // Trạng thái nút Theo dõi: đăng nhập → cờ is_saved từ server;
+                    // khách → danh sách localStorage của máy này.
+                    isSavedEvent = AppAuth.isLoggedIn()
+                        ? !!eventData.is_saved
+                        : readSavedEventCodes().includes(currentEventCode);
+                    updateFollowButton();
 
                     // Tự động tính toán khi tải sự kiện
                     calculateSplit(false);
@@ -1684,21 +1693,20 @@
             localStorage.setItem('savedEventCodes', JSON.stringify(savedEventCodes));
         }
 
-        // Ghi nhớ event vào "Sự Kiện Của Tôi": đăng nhập → lưu theo tài khoản
-        // (idempotent, fire-and-forget — lỗi mạng thì lần mở sau lưu lại);
-        // chưa đăng nhập → localStorage.
-        function rememberEvent(eventCode) {
-            if (AppAuth.isLoggedIn()) {
-                $.ajax({
-                    url: '/api/my-events/save',
-                    method: 'POST',
-                    contentType: 'application/json',
-                    headers: AppAuth.authHeaders(),
-                    data: JSON.stringify({ codes: [eventCode] })
-                });
-            } else {
-                saveEventCodeToLocalStorage(eventCode);
+        // Nút Theo dõi / Bỏ theo dõi trên header: chỉ hiện với event đã có trên
+        // server và KHÔNG phải của mình — event mình tạo luôn nằm sẵn trong
+        // "Sự Kiện Của Tôi" theo owner_id, không cần theo dõi. Nội dung nút là
+        // HTML tĩnh (không có dữ liệu user) nên .html() an toàn.
+        function updateFollowButton() {
+            const $btn = $('#followEventBtn');
+            if (!currentEventCode || isOwner) {
+                $btn.addClass('d-none');
+                return;
             }
+            $btn.removeClass('d-none');
+            $btn.html(isSavedEvent
+                ? '<i class="fas fa-bell-slash me-1"></i>Bỏ theo dõi'
+                : '<i class="fas fa-bell me-1"></i>Theo dõi');
         }
 
         // Migration một lần: đẩy danh sách đã lưu trên máy lên tài khoản rồi
@@ -2760,6 +2768,41 @@
             $('#savedEventsModal').modal('hide');
         });
 
+        // Theo dõi / Bỏ theo dõi event đang mở (chỉ hiện khi không phải owner).
+        // Đăng nhập → saved_events trên tài khoản; khách → localStorage máy này
+        // (đăng nhập sẽ được migrateLocalSavedEvents đẩy lên tài khoản).
+        $('#followEventBtn').click(function () {
+            if (!currentEventCode) return;
+            const code = currentEventCode;
+            const follow = !isSavedEvent;
+            function done() {
+                isSavedEvent = follow;
+                updateFollowButton();
+                showToast(follow
+                    ? 'Đã theo dõi sự kiện — xem lại trong "Sự Kiện Của Tôi".'
+                    : 'Đã bỏ theo dõi sự kiện.', 'success');
+            }
+            if (AppAuth.isLoggedIn()) {
+                $.ajax(follow ? {
+                    url: '/api/my-events/save',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    headers: AppAuth.authHeaders(),
+                    data: JSON.stringify({ codes: [code] })
+                } : {
+                    url: `/api/my-events/${encodeURIComponent(code)}`,
+                    method: 'DELETE',
+                    headers: AppAuth.authHeaders()
+                }).done(done).fail(function () {
+                    showToast('Không cập nhật được trạng thái theo dõi, vui lòng thử lại.', 'error');
+                });
+            } else {
+                if (follow) saveEventCodeToLocalStorage(code);
+                else removeEventCodeFromLocalStorage(code);
+                done();
+            }
+        });
+
         // Gỡ khỏi "Sự Kiện Của Tôi" — không xóa event, mở lại link là lưu lại được
         $(document).on('click', '.unsave-event-btn', function (e) {
             e.stopPropagation();
@@ -2768,6 +2811,10 @@
 
             function done() {
                 showToast('Đã gỡ sự kiện khỏi danh sách.', 'success');
+                if (eventCode === currentEventCode) {
+                    isSavedEvent = false;
+                    updateFollowButton();
+                }
                 renderSavedEvents();
             }
             if (AppAuth.isLoggedIn()) {
