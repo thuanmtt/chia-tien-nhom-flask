@@ -136,6 +136,22 @@ CREATE TABLE IF NOT EXISTS saved_events (
     PRIMARY KEY (user_id, event_id)
 );
 
+-- "Thùng rác" khi xóa event: DELETE là xóa cứng (cascade cả event_revisions),
+-- nên ngay trước khi xóa, cả document được chụp vào đây trong CÙNG transaction
+-- — cứu dữ liệu lỡ tay bằng SQL thủ công (chưa có UI khôi phục). Dòng quá
+-- 90 ngày được dọn dần nhân tiện mỗi lần xóa event. Không FK sang events
+-- (event nguồn đã bị xóa).
+CREATE TABLE IF NOT EXISTS deleted_events (
+    id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id   uuid NOT NULL,
+    event_code text NOT NULL,
+    title      text NOT NULL DEFAULT '',
+    owner_id   uuid,
+    deleted_by uuid,
+    document   jsonb NOT NULL,
+    deleted_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_events_event_code ON events (event_code);
 CREATE INDEX IF NOT EXISTS idx_events_owner_id   ON events (owner_id);
 CREATE INDEX IF NOT EXISTS idx_events_updated_at ON events (updated_at DESC);
@@ -148,6 +164,11 @@ CREATE INDEX IF NOT EXISTS idx_event_revisions_event_created
     ON event_revisions (event_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_event_collaborators_user ON event_collaborators (user_id);
 CREATE INDEX IF NOT EXISTS idx_saved_events_user ON saved_events (user_id);
+-- Cho ON DELETE CASCADE từ events và DELETE ... USING events (unsave) —
+-- không có index này thì mỗi lần xóa event seq-scan cả saved_events.
+CREATE INDEX IF NOT EXISTS idx_saved_events_event ON saved_events (event_id);
+CREATE INDEX IF NOT EXISTS idx_deleted_events_code ON deleted_events (event_code);
+CREATE INDEX IF NOT EXISTS idx_deleted_events_deleted_at ON deleted_events (deleted_at);
 
 -- Supabase expose PostgREST công khai với anon key → bật RLS, KHÔNG tạo policy
 -- (deny-all cho anon/authenticated). Flask kết nối bằng role postgres (owner của
@@ -164,6 +185,7 @@ ALTER TABLE user_profiles         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE event_revisions       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE event_collaborators   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE saved_events          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE deleted_events        ENABLE ROW LEVEL SECURITY;
 
 -- Bỏ cơ chế edit key (2026-08-12): quyền chỉ còn owner / người được mời /
 -- chế độ chia sẻ. Idempotent. LƯU Ý deploy: chỉ chạy schema.sql lên DB đang
