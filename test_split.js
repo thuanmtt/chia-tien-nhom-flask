@@ -248,4 +248,24 @@ test('freezeAllExpenses: thêm thành viên mới sau khi chốt — kết quả
     assertTransfersSettle(r);
 });
 
+test('normalizeExpenses: chuyển khoản không-selected thành selected theo snapshot, lọc tên chết', () => {
+    const expenses = [
+        { title: 'a', amount: 1, payer: 'A', benefitType: 'all', beneficiaries: ['A', 'B', 'Đã Xóa'] },
+        { title: 'b', amount: 1, payer: 'B' }, // thiếu benefitType, không snapshot
+        { title: 'c', amount: 1, payer: 'C', benefitType: 'selected', beneficiaries: ['C'] },
+    ];
+    const members = ['A', 'B', 'C'];
+    const count = S.normalizeExpenses(expenses, members);
+    assert.strictEqual(count, 2);
+    assert.strictEqual(expenses[0].benefitType, 'selected');
+    assert.deepStrictEqual(expenses[0].beneficiaries, ['A', 'B']); // lọc 'Đã Xóa'
+    assert.strictEqual(expenses[1].benefitType, 'selected');
+    assert.deepStrictEqual(expenses[1].beneficiaries, ['A', 'B', 'C']); // fallback
+    // Copy, không giữ tham chiếu mảy members
+    members.push('D');
+    assert.deepStrictEqual(expenses[1].beneficiaries, ['A', 'B', 'C']);
+    // Khoản 'selected' sẵn có: không đụng
+    assert.deepStrictEqual(expenses[2].beneficiaries, ['C']);
+});
+
 console.log(`\n${passed} test passed${process.exitCode ? ' (CÓ TEST FAIL)' : ' — tất cả OK'}`);

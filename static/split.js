@@ -54,6 +54,23 @@
         return count;
     }
 
+    // Chuẩn hóa khi tải event: mọi khoản không-'selected' (dữ liệu 'all' cũ)
+    // → 'selected' với snapshot đã lưu (lọc tên còn tồn tại; rỗng thì lấy
+    // danh sách hiện tại). Sửa tại chỗ, trả về số khoản đã chuyển.
+    function normalizeExpenses(expenses, members) {
+        let count = 0;
+        (expenses || []).forEach(e => {
+            if (!e || e.benefitType === 'selected') return;
+            const stored = Array.isArray(e.beneficiaries)
+                ? e.beneficiaries.filter(m => (members || []).includes(m))
+                : [];
+            e.benefitType = 'selected';
+            e.beneficiaries = stored.length > 0 ? stored : (members || []).slice();
+            count++;
+        });
+        return count;
+    }
+
     // Trả về map: memberName -> couple object (chỉ các nhóm hợp lệ: >=2 thành viên thực sự tồn tại)
     function getValidCouplesForMembers(currentMembers, coupleList) {
         const result = { byMember: {}, list: [] };
@@ -199,6 +216,7 @@
         amountInVND: amountInVND,
         getExpenseBeneficiaries: getExpenseBeneficiaries,
         freezeAllExpenses: freezeAllExpenses,
+        normalizeExpenses: normalizeExpenses,
         getValidCouplesForMembers: getValidCouplesForMembers,
         computeSplit: computeSplit,
     };
