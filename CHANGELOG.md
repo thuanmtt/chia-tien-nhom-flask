@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-08-12 — "Sự Kiện Của Tôi" theo tài khoản + bỏ edit key
+
+- Danh sách "Sự Kiện Của Tôi" lưu theo tài khoản (bảng `saved_events`) — đổi máy vẫn thấy;
+  danh sách trên máy được tự chuyển lên tài khoản ở lần đăng nhập tới.
+- Nút mới "Gỡ khỏi danh sách" cho event không thuộc sở hữu; nút Xóa chỉ còn cho owner.
+- BỎ cơ chế edit key: quyền chỉ còn chủ sở hữu / người được mời / chế độ chia sẻ
+  (kiểu Google Docs). Link cũ có `&key=` vẫn mở được — tham số bị bỏ qua; ai đang
+  sửa nhờ key (không phải owner/không được mời) cần được owner mời hoặc bật
+  "ai có link đều chỉnh sửa".
+- Event không có chủ sở hữu (tạo trước khi có đăng nhập): mặc định ai đăng nhập
+  cũng sửa/xóa được; không đặt được chế độ Hạn chế.
+
 ## [1.2.0] - 2026-08-12
 
 ### Thêm mới

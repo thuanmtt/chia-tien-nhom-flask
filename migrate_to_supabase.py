@@ -10,7 +10,7 @@ Cách chạy (một lần, chạy lại được — upsert theo event_code):
    cutover — khi Supabase đã nhận ghi mới — event nào có updated_at trên Supabase
    MỚI HƠN bản ghi ở DB cũ sẽ được tự động bỏ qua, không bị đè lại bằng snapshot cũ.
 
-- Giữ nguyên event_code, edit_key, created_at, updated_at → link chia sẻ cũ sống nguyên.
+- Giữ nguyên event_code, created_at, updated_at → link chia sẻ cũ sống nguyên.
 - owner_id để NULL (event legacy chưa thuộc tài khoản nào).
 - Payload từng event đi qua validate_event_payload để chuẩn hóa như request thật;
   event lỗi parse/validate chỉ bị bỏ qua (log lại), không chặn cả đợt.
@@ -71,14 +71,14 @@ def main():
             # Supabase, giá trị naive này được hiểu theo timezone của session hiện
             # tại — đúng vì session cũng chạy UTC trên Supabase.
             cur.execute(
-                '''INSERT INTO events (event_code, title, edit_key, created_at, updated_at)
-                   VALUES (%s, %s, %s, %s, %s)
+                '''INSERT INTO events (event_code, title, created_at, updated_at)
+                   VALUES (%s, %s, %s, %s)
                    ON CONFLICT (event_code) DO UPDATE
-                   SET title = EXCLUDED.title, edit_key = EXCLUDED.edit_key,
+                   SET title = EXCLUDED.title,
                        created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at
                    WHERE events.updated_at <= EXCLUDED.updated_at
                    RETURNING id''',
-                (code, doc['title'], row['edit_key'], row['created_at'], row['updated_at']),
+                (code, doc['title'], row['created_at'], row['updated_at']),
             )
             row_result = cur.fetchone()
             if row_result is None:

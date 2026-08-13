@@ -151,11 +151,10 @@
         // Kiểm tra xem có event_code trong URL không
         const urlParams = new URLSearchParams(window.location.search);
         const urlEventCode = urlParams.get('event_code');
-        const urlEditKey = urlParams.get('key');
-        
+
         // Quyền chỉnh sửa do SERVER quyết định: GET event trả về cờ can_edit
-        // dựa trên khóa X-Edit-Key gửi kèm. Có khóa hợp lệ → giao diện chỉnh sửa,
-        // không có/sai khóa → giao diện chỉ xem (loadEventFromServer xử lý).
+        // theo JWT + chế độ chia sẻ. Có quyền → giao diện chỉnh sửa,
+        // không có → giao diện chỉ xem (loadEventFromServer xử lý).
         // Overlay loading toàn trang khi đang tải sự kiện từ link.
         // % chỉ là mô phỏng (nhanh lúc đầu, chậm dần về ~95%) — cả quá trình tải
         // chỉ có 1 request nên không đo được tiến độ thật.
@@ -186,15 +185,19 @@
             if (window.location.pathname.startsWith('/share/')) {
                 allowEdit = false;
             } else if (urlEventCode) {
-                allowEdit = !!(urlEditKey || getEditKey(urlEventCode));
+                allowEdit = false;
             }
             updateUIForEditMode();
         }
+
+        // Cơ chế edit key đã bỏ (2026-08) — dọn khóa cũ còn sót trên máy
+        localStorage.removeItem('eventEditKeys');
 
         // Chờ AppAuth biết session (từ localStorage, không chờ mạng lâu) rồi mới
         // tải event — để owner mở event của mình trên máy mới nhận đúng can_edit
         // qua JWT thay vì bị rơi về chế độ chỉ xem.
         AppAuth.onReady(function () {
+            migrateLocalSavedEvents();
             if (window.location.pathname.startsWith('/share/')) {
                 // Link chỉ-xem kiểu cũ (/share/<code>) — giữ tương thích, luôn chỉ xem
                 allowEdit = false;
@@ -205,14 +208,9 @@
                     loadEventFromServer(currentEventCode, { forceViewOnly: true });
                 }
             } else if (urlEventCode) {
-                // Link chia sẻ /?event_code=X[&key=...]: lưu khóa nếu có,
-                // server sẽ xác nhận quyền thật qua can_edit
-                if (urlEditKey) {
-                    setEditKey(urlEventCode, urlEditKey);
-                }
-                // Trạng thái tạm trong lúc chờ server: có khóa → giả định sửa được,
-                // không khóa → chỉ xem (tránh nháy giao diện sai cho người xem)
-                allowEdit = !!(urlEditKey || getEditKey(urlEventCode));
+                // Link chia sẻ /?event_code=X — server xác nhận quyền qua can_edit.
+                // Link cũ /?event_code=X&key=... vẫn mở được: tham số key bị bỏ qua.
+                allowEdit = false;
                 currentEventCode = urlEventCode;
                 loadEventFromServer(currentEventCode);
             } else if (currentEventCode) {
@@ -565,52 +563,9 @@
             showAppLoading(false);
         }
 
-        // ===== Khóa chỉnh sửa (edit key) =====
-        // Server chỉ chấp nhận PUT/DELETE khi X-Edit-Key khớp với khóa của sự kiện.
-        function getEditKeyMap() {
-            try {
-                const map = JSON.parse(localStorage.getItem('eventEditKeys') || '{}');
-                return (map && typeof map === 'object') ? map : {};
-            } catch (e) {
-                return {};
-            }
-        }
-
-        function getEditKey(eventCode) {
-            return getEditKeyMap()[eventCode] || null;
-        }
-
-        function setEditKey(eventCode, key) {
-            if (!eventCode || !key) return;
-            const map = getEditKeyMap();
-            map[eventCode] = key;
-            localStorage.setItem('eventEditKeys', JSON.stringify(map));
-        }
-
-        function removeEditKey(eventCode) {
-            const map = getEditKeyMap();
-            if (eventCode in map) {
-                delete map[eventCode];
-                localStorage.setItem('eventEditKeys', JSON.stringify(map));
-            }
-        }
-
-        // Sự kiện cũ (tạo trước khi có edit key): tự sinh khóa gửi lên,
-        // server sẽ "nhận" khóa này cho sự kiện chưa có khóa.
-        function getOrCreateEditKey(eventCode) {
-            let key = getEditKey(eventCode);
-            if (!key) {
-                key = (window.crypto && crypto.randomUUID)
-                    ? crypto.randomUUID()
-                    : 'k-' + Date.now().toString(36) + Math.random().toString(36).slice(2);
-                setEditKey(eventCode, key);
-            }
-            return key;
-        }
-
-        // Link chia sẻ giờ chỉ có event_code (không kèm key) — server quyết
-        // quyền theo cài đặt chia sẻ kiểu Google Docs (shareAccess/shareRole).
-        // Link cũ dạng &key=... vẫn được server tôn trọng.
+        // Link chia sẻ chỉ có event_code — server quyết quyền theo cài đặt
+        // chia sẻ kiểu Google Docs (shareAccess/shareRole).
+        // ===== Link chia sẻ =====
         function buildShareLink(eventCode) {
             return window.location.origin + '/?event_code=' + encodeURIComponent(eventCode);
         }
@@ -633,7 +588,7 @@
             }
             showToast(successMsg, 'success');
         }
-        // ===== Hết phần khóa chỉnh sửa =====
+        // ===== Hết phần chia sẻ =====
 
         // Indicator trạng thái lưu ở header: Đang lưu... / Đã lưu lúc HH:MM / lỗi
         function setSaveStatus(state) {
@@ -663,7 +618,7 @@
             if (!allowEdit) return; // Không cho phép lưu nếu ở chế độ chỉ xem
 
             // Tạo sự kiện mới cần tài khoản (server cũng chặn 401) — sự kiện đã
-            // tồn tại vẫn lưu được bằng edit_key như cũ (người được chia sẻ link)
+            // tồn tại thì quyền sửa do server quyết theo chế độ chia sẻ.
             if (!currentEventCode && !AppAuth.isLoggedIn()) {
                 setSaveStatus('error');
                 showToast('Vui lòng đăng nhập để tạo và lưu sự kiện.', 'warning');
@@ -708,7 +663,7 @@
                     url: `/api/events/${currentEventCode}`,
                     method: 'PUT',
                     contentType: 'application/json',
-                    headers: AppAuth.authHeaders({ 'X-Edit-Key': getOrCreateEditKey(currentEventCode) }),
+                    headers: AppAuth.authHeaders(),
                     data: JSON.stringify(eventData),
                     success: function(response) {
                         if (response.success) {
@@ -729,9 +684,9 @@
                             showToast('Vui lòng đăng nhập để chỉnh sửa sự kiện.', 'warning');
                             AppAuth.showLoginModal();
                         } else if (xhr.status === 403) {
-                            // Khóa không còn hợp lệ → chuyển giao diện về chế độ chỉ xem
+                            // Server từ chối quyền (bị gỡ khỏi danh sách mời / chế độ
+                            // chia sẻ đổi) → chuyển giao diện về chế độ chỉ xem
                             showToast('Bạn không có quyền chỉnh sửa sự kiện này — chuyển về chế độ chỉ xem.', 'error');
-                            removeEditKey(currentEventCode);
                             allowEdit = false;
                             updateUIForEditMode();
                         } else if (xhr.status === 409) {
@@ -759,10 +714,7 @@
                             currentEventCode = response.event_code;
                             localStorage.setItem('currentEventCode', currentEventCode);
                             $('#eventCodeDisplay').text(currentEventCode);
-                            saveEventCodeToLocalStorage(currentEventCode); // Lưu event_code vào localStorage
-                            if (response.edit_key) {
-                                setEditKey(currentEventCode, response.edit_key);
-                            }
+                            rememberEvent(currentEventCode); // Thêm vào "Sự Kiện Của Tôi"
                             lastKnownUpdatedAt = response.updated_at || null;
                             isOwner = true; // người tạo là chủ sở hữu
                             setSaveStatus('saved');
@@ -785,16 +737,14 @@
             }
         }
 
-        // Hàm tải sự kiện từ server.
-        // Gửi kèm khóa chỉnh sửa (nếu có) để server trả về can_edit —
-        // cờ này quyết định giao diện chỉnh sửa hay chỉ xem.
+        // Hàm tải sự kiện từ server — server trả cờ can_edit (JWT + chế độ
+        // chia sẻ), cờ này quyết định giao diện chỉnh sửa hay chỉ xem.
         function loadEventFromServer(eventCode, opts) {
             opts = opts || {};
-            const storedKey = opts.forceViewOnly ? null : getEditKey(eventCode);
             $.ajax({
                 url: `/api/events/${eventCode}`,
                 method: 'GET',
-                headers: AppAuth.authHeaders(storedKey ? { 'X-Edit-Key': storedKey } : {}),
+                headers: AppAuth.authHeaders(),
                 success: function(response) {
                     if (response.success) {
                         const eventData = response.event;
@@ -806,15 +756,8 @@
                             $('#loginToEditBanner').addClass('d-none');
                         } else {
                             allowEdit = !!eventData.can_edit;
-                            // Có quyền sửa nhưng chưa đăng nhập → banner mời đăng nhập,
-                            // KHÔNG xóa key (key vẫn đúng, chỉ thiếu đăng nhập)
-                            const loginRequired = !!eventData.login_required_to_edit;
-                            $('#loginToEditBanner').toggleClass('d-none', !loginRequired);
-                            if (!allowEdit && storedKey && !loginRequired) {
-                                // Khóa sai hoặc đã bị đổi — bỏ khóa hỏng, chuyển chỉ xem
-                                removeEditKey(eventCode);
-                                showToast('Khóa chỉnh sửa không đúng — đang mở ở chế độ chỉ xem.', 'warning');
-                            }
+                            // Có quyền sửa nhưng chưa đăng nhập → banner mời đăng nhập
+                            $('#loginToEditBanner').toggleClass('d-none', !eventData.login_required_to_edit);
                         }
 
                         // Mốc updated_at cho optimistic locking khi lưu
@@ -860,7 +803,7 @@
                         // để tránh trường hợp mở link chỉ-xem rồi quay lại "/" vẫn vào được chế độ sửa
                         if (allowEdit) {
                             localStorage.setItem('currentEventCode', currentEventCode);
-                            saveEventCodeToLocalStorage(currentEventCode); // Lưu vào danh sách sự kiện đã lưu
+                            rememberEvent(currentEventCode); // Thêm vào "Sự Kiện Của Tôi"
                         }
 
                         // Tự động tính toán khi tải sự kiện
@@ -1605,7 +1548,9 @@
             }
         }
 
-        // Hàm lưu event_code vào localStorage
+        // ===== "Sự Kiện Của Tôi" =====
+        // Đăng nhập: danh sách lưu THEO TÀI KHOẢN (bảng saved_events, đồng bộ
+        // giữa các thiết bị). Chưa đăng nhập: localStorage như cũ (chỉ để xem).
         function saveEventCodeToLocalStorage(eventCode) {
             let savedEventCodes = JSON.parse(localStorage.getItem('savedEventCodes') || '[]');
             if (!savedEventCodes.includes(eventCode)) {
@@ -1614,69 +1559,120 @@
             }
         }
 
-        // Hàm xóa event_code khỏi localStorage
         function removeEventCodeFromLocalStorage(eventCode) {
             let savedEventCodes = JSON.parse(localStorage.getItem('savedEventCodes') || '[]');
             savedEventCodes = savedEventCodes.filter(code => code !== eventCode);
             localStorage.setItem('savedEventCodes', JSON.stringify(savedEventCodes));
         }
 
+        // Ghi nhớ event vào "Sự Kiện Của Tôi": đăng nhập → lưu theo tài khoản
+        // (idempotent, fire-and-forget — lỗi mạng thì lần mở sau lưu lại);
+        // chưa đăng nhập → localStorage.
+        function rememberEvent(eventCode) {
+            if (AppAuth.isLoggedIn()) {
+                $.ajax({
+                    url: '/api/my-events/save',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    headers: AppAuth.authHeaders(),
+                    data: JSON.stringify({ codes: [eventCode] })
+                });
+            } else {
+                saveEventCodeToLocalStorage(eventCode);
+            }
+        }
+
+        // Migration một lần: đẩy danh sách đã lưu trên máy lên tài khoản rồi
+        // XÓA local — nếu giữ lại, event đã gỡ trên máy khác sẽ "hồi sinh"
+        // ở lần merge sau. Thất bại thì giữ nguyên local, lần đăng nhập sau thử lại.
+        function migrateLocalSavedEvents() {
+            if (!AppAuth.isLoggedIn()) return;
+            let codes;
+            try {
+                codes = JSON.parse(localStorage.getItem('savedEventCodes') || '[]');
+            } catch (e) {
+                codes = [];
+            }
+            if (!Array.isArray(codes) || codes.length === 0) return;
+            const batches = [];
+            for (let i = 0; i < codes.length; i += 50) batches.push(codes.slice(i, i + 50));
+            Promise.all(batches.map(batch => $.ajax({
+                url: '/api/my-events/save',
+                method: 'POST',
+                contentType: 'application/json',
+                headers: AppAuth.authHeaders(),
+                data: JSON.stringify({ codes: batch })
+            }))).then(function () {
+                localStorage.removeItem('savedEventCodes');
+            }).catch(function () { /* giữ nguyên local, lần đăng nhập sau thử lại */ });
+        }
+
         // Hàm hiển thị danh sách sự kiện đã lưu.
-        // Đã đăng nhập: gộp event sở hữu trên server (/api/my-events) với danh
-        // sách localStorage (event được chia sẻ cho mình vẫn hiện).
+        // Đăng nhập: danh sách theo TÀI KHOẢN (/api/my-events = sở hữu ∪ được
+        // mời ∪ đã lưu). Chưa đăng nhập: danh sách localStorage của máy này.
         function renderSavedEvents() {
             $('#savedEventsList').empty();
             $('#savedEventsList').append('<p class="text-center text-muted">Đang tải...</p>');
 
-            const localCodes = JSON.parse(localStorage.getItem('savedEventCodes') || '[]');
+            const loggedIn = AppAuth.isLoggedIn();
+            const emptyText = loggedIn
+                ? 'Chưa có sự kiện nào trong tài khoản của bạn.'
+                : 'Chưa có sự kiện nào được lưu trên máy này.';
 
-            function proceed(serverCodes) {
-                // lookup nhận tối đa 50 mã — ưu tiên mã trên server (mới hơn)
-                const allCodes = Array.from(new Set(serverCodes.concat(localCodes))).slice(0, 50);
+            function fail() {
+                $('#savedEventsList').empty();
+                $('#savedEventsList').append('<p class="text-center text-danger">Không tải được danh sách sự kiện. Vui lòng thử lại.</p>');
+            }
+
+            // localCodes chỉ có ở nhánh chưa đăng nhập — dùng để dọn mã đã chết
+            function proceed(codes, ownedByCode, localCodes) {
+                // lookup nhận tối đa 50 mã
+                const allCodes = codes.slice(0, 50);
                 if (allCodes.length === 0) {
                     $('#savedEventsList').empty();
-                    $('#savedEventsList').append('<p class="text-center text-muted">Chưa có sự kiện nào được lưu trên máy này.</p>');
+                    $('#savedEventsList').append(`<p class="text-center text-muted">${emptyText}</p>`);
                     return;
                 }
                 // Chỉ dọn các mã LOCAL đã thực sự được gửi đi tra cứu — mã bị cắt
-                // bớt do vượt giới hạn 50 sẽ không có trong response nhưng không
-                // đồng nghĩa là không còn tồn tại, nên không được prune.
-                const sentLocal = localCodes.filter(code => allCodes.includes(code));
+                // bớt do vượt giới hạn 50 không đồng nghĩa là không còn tồn tại.
+                const sentLocal = (localCodes || []).filter(code => allCodes.includes(code));
                 $.ajax({
                     url: '/api/events/lookup',
                     method: 'POST',
                     contentType: 'application/json',
-                    // Kèm JWT: event ở chế độ "Hạn chế" chỉ hiện với chính owner
+                    // Kèm JWT: event ở chế độ "Hạn chế" chỉ hiện với owner/người được mời
                     headers: AppAuth.authHeaders(),
                     data: JSON.stringify({ codes: allCodes }),
                     success: function (response) {
                         const events = (response && response.events) || [];
-                        // Mã LOCAL không còn tồn tại trên server → dọn khỏi localStorage
                         const found = new Set(events.map(e => e.event_code));
                         sentLocal
                             .filter(code => !found.has(code))
                             .forEach(removeEventCodeFromLocalStorage);
-                        displaySavedEvents(events);
+                        displaySavedEvents(events, ownedByCode, emptyText);
                     },
-                    error: function () {
-                        $('#savedEventsList').empty();
-                        $('#savedEventsList').append('<p class="text-center text-danger">Không tải được danh sách sự kiện. Vui lòng thử lại.</p>');
-                    }
+                    error: fail
                 });
             }
 
-            if (AppAuth.isLoggedIn()) {
+            if (loggedIn) {
                 $.ajax({ url: '/api/my-events', headers: AppAuth.authHeaders() })
-                    .done(function (r) { proceed(((r && r.events) || []).map(e => e.event_code)); })
-                    .fail(function () { proceed([]); });
+                    .done(function (r) {
+                        const list = (r && r.events) || [];
+                        const ownedByCode = {};
+                        list.forEach(e => { ownedByCode[e.event_code] = !!e.owned; });
+                        proceed(list.map(e => e.event_code), ownedByCode, []);
+                    })
+                    .fail(fail);
             } else {
-                proceed([]);
+                const localCodes = JSON.parse(localStorage.getItem('savedEventCodes') || '[]');
+                proceed(localCodes, {}, localCodes);
             }
         }
 
         // Vừa đăng nhập xong mà đang có dữ liệu nháp chưa tạo trên server → tạo luôn.
-        // Đang mở event thì tải lại để server tính lại can_edit (đăng nhập → mở
-        // khóa chỉnh sửa; đăng xuất → về chỉ xem + banner). CHỈ tải lại khi trạng
+        // Đang mở event thì tải lại để server tính lại can_edit (đăng nhập → cho
+        // phép chỉnh sửa; đăng xuất → về chỉ xem + banner). CHỈ tải lại khi trạng
         // thái đăng nhập thực sự đổi — appauth:change còn bắn cả khi refresh token
         // (~mỗi giờ), reload lúc đó sẽ xóa mất form người dùng đang nhập dở.
         let lastAuthLoggedIn = null;
@@ -1684,6 +1680,7 @@
             const loggedIn = AppAuth.isLoggedIn();
             const changed = lastAuthLoggedIn !== null && loggedIn !== lastAuthLoggedIn;
             lastAuthLoggedIn = loggedIn;
+            if (loggedIn) migrateLocalSavedEvents();
             if (loggedIn && !currentEventCode && allowEdit && members.length > 0) {
                 saveEvent(false);
             } else if (changed && currentEventCode) {
@@ -1722,11 +1719,11 @@
         }
 
         // Hàm hiển thị danh sách sự kiện
-        function displaySavedEvents(events) {
+        function displaySavedEvents(events, ownedByCode, emptyText) {
             $('#savedEventsList').empty();
 
             if (events.length === 0) {
-                $('#savedEventsList').append('<p class="text-center text-muted">Chưa có sự kiện nào được lưu trên máy này.</p>');
+                $('#savedEventsList').append(`<p class="text-center text-muted">${emptyText}</p>`);
                 return;
             }
 
@@ -1741,6 +1738,15 @@
                     ? `${formatCurrency(total)} <span class="text-danger small">(thiếu tỷ giá: ${escapeHtml(missingRates.join(', '))})</span>`
                     : formatCurrency(total);
                 const safeCode = escapeHtml(event.event_code);
+                // Owner → xóa thật; còn lại → chỉ gỡ khỏi danh sách của mình
+                const owned = !!(ownedByCode && ownedByCode[event.event_code]);
+                const actionBtn = owned
+                    ? `<button class="btn btn-sm btn-danger delete-event-btn" data-event-code="${safeCode}" title="Xóa sự kiện">
+                            <i class="fas fa-trash"></i>
+                       </button>`
+                    : `<button class="btn btn-sm btn-outline-secondary unsave-event-btn" data-event-code="${safeCode}" title="Gỡ khỏi danh sách">
+                            <i class="fas fa-times"></i>
+                       </button>`;
 
                 $('#savedEventsList').append(`
                     <div class="list-group-item list-group-item-action event-item" data-event-code="${safeCode}">
@@ -1759,9 +1765,7 @@
                                 <button class="btn btn-sm btn-outline-primary me-1 share-event-btn" data-event-code="${safeCode}">
                                     <i class="fas fa-share-alt"></i>
                                 </button>
-                                <button class="btn btn-sm btn-danger delete-event-btn" data-event-code="${safeCode}">
-                                    <i class="fas fa-trash"></i>
-                                </button>
+                                ${actionBtn}
                             </div>
                         </div>
                     </div>
@@ -2576,22 +2580,46 @@
             $('#savedEventsModal').modal('hide');
         });
 
+        // Gỡ khỏi "Sự Kiện Của Tôi" — không xóa event, mở lại link là lưu lại được
+        $(document).on('click', '.unsave-event-btn', function (e) {
+            e.stopPropagation();
+            // .attr() thay vì .data(): mã sự kiện có thể toàn chữ số, jQuery sẽ ép kiểu
+            const eventCode = String($(this).attr('data-event-code') || '');
+
+            function done() {
+                showToast('Đã gỡ sự kiện khỏi danh sách.', 'success');
+                renderSavedEvents();
+            }
+            if (AppAuth.isLoggedIn()) {
+                $.ajax({
+                    url: `/api/my-events/${encodeURIComponent(eventCode)}`,
+                    method: 'DELETE',
+                    headers: AppAuth.authHeaders(),
+                    success: done,
+                    error: function () {
+                        showToast('Không gỡ được sự kiện, vui lòng thử lại.', 'error');
+                    }
+                });
+            } else {
+                removeEventCodeFromLocalStorage(eventCode);
+                done();
+            }
+        });
+
         // Xử lý xoá sự kiện
         $(document).on('click', '.delete-event-btn', function (e) {
             e.stopPropagation(); // Ngăn không cho sự kiện propagate lên parent
-            const eventCode = $(this).data('event-code');
+            // .attr() thay vì .data(): mã sự kiện có thể toàn chữ số, jQuery sẽ ép kiểu
+            const eventCode = String($(this).attr('data-event-code') || '');
 
             showConfirm('Bạn có chắc chắn muốn xoá sự kiện này?', function () {
                 $.ajax({
                     url: `/api/events/${eventCode}`,
                     method: 'DELETE',
-                    headers: AppAuth.authHeaders({ 'X-Edit-Key': getOrCreateEditKey(eventCode) }),
+                    headers: AppAuth.authHeaders(),
                     success: function(response) {
                         if (response.success) {
                             showToast('Đã xoá sự kiện thành công!', 'success');
-
-                            // Xóa event_code khỏi localStorage
-                            removeEventCodeFromLocalStorage(eventCode);
 
                             // Nếu đang xoá sự kiện hiện tại, tạo mới
                             if (eventCode === currentEventCode) {
@@ -2690,14 +2718,9 @@
         function loadHistory() {
             $('#historyLoading').removeClass('d-none');
             $('#historyList').empty();
-            // Chỉ gửi key đã lưu (nếu có) — KHÔNG tự sinh key mới ở đây.
-            // Đây là GET (xem lịch sử), không được phép "nhận" (adopt) edit_key
-            // của event cũ — nếu không, việc chỉ mở modal lịch sử cũng khóa
-            // event legacy vào key tự sinh này.
-            const storedKey = getEditKey(currentEventCode);
             $.ajax({
                 url: `/api/events/${currentEventCode}/revisions`,
-                headers: AppAuth.authHeaders(storedKey ? { 'X-Edit-Key': storedKey } : {}),
+                headers: AppAuth.authHeaders(),
                 success: function (res) {
                     $('#historyLoading').addClass('d-none');
                     if (res.success) renderHistory(res.revisions || []);
@@ -2730,7 +2753,7 @@
                         url: `/api/events/${currentEventCode}/restore`,
                         method: 'POST',
                         contentType: 'application/json',
-                        headers: AppAuth.authHeaders({ 'X-Edit-Key': getOrCreateEditKey(currentEventCode) }),
+                        headers: AppAuth.authHeaders(),
                         data: JSON.stringify({ revision_id: revisionId, expectedUpdatedAt: lastKnownUpdatedAt }),
                         success: function (res) {
                             if (res.success) {
@@ -3008,7 +3031,7 @@
                 url: `/api/events/${currentEventCode}/sharing`,
                 method: 'PUT',
                 contentType: 'application/json',
-                headers: AppAuth.authHeaders({ 'X-Edit-Key': getOrCreateEditKey(currentEventCode) }),
+                headers: AppAuth.authHeaders(),
                 data: JSON.stringify({ access: access, role: role }),
                 success: function () {
                     showToast('Đã cập nhật quyền truy cập.', 'success');

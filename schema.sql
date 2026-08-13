@@ -8,11 +8,10 @@ CREATE TABLE IF NOT EXISTS events (
     id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     event_code text UNIQUE NOT NULL,
     title      text NOT NULL,
-    edit_key   text,
     -- id user Supabase Auth; NULL = event legacy/migrate. Không FK sang auth.users
     -- để schema chạy được trên Postgres thường khi dev/test.
     owner_id   uuid,
-    -- Chia sẻ kiểu Google Docs: 'restricted' (chỉ owner/người có edit_key)
+    -- Chia sẻ kiểu Google Docs: 'restricted' (chỉ owner/người được mời)
     -- hoặc 'link' (bất kỳ ai có đường liên kết) với vai trò 'viewer'/'editor'.
     -- Mặc định: ai có link đều xem được (đúng hành vi trước đây).
     share_access text NOT NULL DEFAULT 'link',
@@ -116,7 +115,7 @@ CREATE TABLE IF NOT EXISTS event_revisions (
 );
 
 -- Người được mời đích danh (kiểu "Những người có quyền truy cập" của Google Docs).
--- Quyền CỘNG DỒN với quyền chung theo link + edit_key; chỉ owner quản lý danh sách.
+-- Quyền CỘNG DỒN với quyền chung theo link; chỉ owner quản lý danh sách.
 -- user_id/added_by là user Supabase Auth — không FK auth.users (giống owner_id)
 -- để schema chạy được trên Postgres thường khi dev/test.
 CREATE TABLE IF NOT EXISTS event_collaborators (
@@ -126,6 +125,15 @@ CREATE TABLE IF NOT EXISTS event_collaborators (
     added_by   uuid,
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (event_id, user_id)
+);
+
+-- "Sự Kiện Của Tôi" theo tài khoản: event user đã LƯU vào danh sách (ngoài event
+-- họ sở hữu / được mời đích danh). Chỉ là bookmark — không mang quyền truy cập.
+CREATE TABLE IF NOT EXISTS saved_events (
+    user_id  uuid NOT NULL,
+    event_id uuid NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    saved_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, event_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_event_code ON events (event_code);
@@ -139,6 +147,7 @@ CREATE INDEX IF NOT EXISTS idx_event_rates_event_id      ON event_rates (event_i
 CREATE INDEX IF NOT EXISTS idx_event_revisions_event_created
     ON event_revisions (event_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_event_collaborators_user ON event_collaborators (user_id);
+CREATE INDEX IF NOT EXISTS idx_saved_events_user ON saved_events (user_id);
 
 -- Supabase expose PostgREST công khai với anon key → bật RLS, KHÔNG tạo policy
 -- (deny-all cho anon/authenticated). Flask kết nối bằng role postgres (owner của
@@ -154,3 +163,9 @@ ALTER TABLE event_rates           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_profiles         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE event_revisions       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE event_collaborators   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE saved_events          ENABLE ROW LEVEL SECURITY;
+
+-- Bỏ cơ chế edit key (2026-08-12): quyền chỉ còn owner / người được mời /
+-- chế độ chia sẻ. Idempotent. LƯU Ý deploy: chỉ chạy schema.sql lên DB đang
+-- phục vụ production SAU khi code mới (không còn đọc edit_key) đã deploy.
+ALTER TABLE events DROP COLUMN IF EXISTS edit_key;
