@@ -516,8 +516,8 @@ def my_events():
 @limiter.limit('30 per minute; 500 per day')
 def save_my_events():
     """Lưu event vào "Sự Kiện Của Tôi" của tài khoản (idempotent). Body
-    {codes: [...]} tối đa 50 mã / lần — dùng cho cả lưu 1 mã khi mở event
-    lẫn migration danh sách localStorage. Mã không tồn tại bị bỏ qua."""
+    {codes: [...]} tối đa 50 mã / lần — dùng cho nút Theo dõi (1 mã) lẫn
+    migration danh sách localStorage khi đăng nhập. Mã không tồn tại bị bỏ qua."""
     try:
         user_id = request_user_id(request)
         if not user_id:
@@ -737,6 +737,17 @@ def get_event(event_code):
 
             doc = load_event_children(cursor, acc.event_id)
 
+            # Trạng thái "theo dõi" của user hiện tại (nút Theo dõi trên UI).
+            # Chỉ tra khi có đăng nhập — ẩn danh luôn False.
+            is_saved = False
+            if user_id:
+                cursor.execute(
+                    '''SELECT EXISTS(SELECT 1 FROM saved_events
+                                     WHERE user_id = %s::uuid AND event_id = %s) AS saved''',
+                    (user_id, acc.event_id),
+                )
+                is_saved = bool(cursor.fetchone()['saved'])
+
         # Mọi thao tác ghi yêu cầu đăng nhập → can_edit ("PUT của bạn sẽ thành
         # công") chỉ true khi CÓ QUYỀN và ĐÃ đăng nhập; có quyền mà chưa đăng
         # nhập → cờ riêng để UI hiện "Đăng nhập để chỉnh sửa".
@@ -750,6 +761,7 @@ def get_event(event_code):
                 'title': acc.title,
                 'can_edit': can_edit,
                 'is_owner': acc.is_owner,
+                'is_saved': is_saved,
                 'login_required_to_edit': login_required_to_edit,
                 'share_access': acc.share_access,
                 'share_role': acc.share_role,

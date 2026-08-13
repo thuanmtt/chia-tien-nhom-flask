@@ -492,6 +492,10 @@ def test_saved_events(token):
     code = r.json()['event_code']
     code2 = None
     try:
+        # is_saved ban đầu: chưa ai lưu
+        r = requests.get(f"{BASE_URL}/api/events/{code}", headers=auth2)
+        assert r.json()['event']['is_saved'] is False, 'chưa lưu → is_saved phải False'
+
         # Chưa đăng nhập → 401
         assert requests.get(f"{BASE_URL}/api/my-events").status_code == 401
         assert requests.post(f"{BASE_URL}/api/my-events/save",
@@ -513,6 +517,15 @@ def test_saved_events(token):
         r = requests.post(f"{BASE_URL}/api/my-events/save",
                           json={'codes': [code]}, headers=auth2)
         assert r.status_code == 200, 'save lần 2 phải idempotent'
+
+        # Cờ is_saved trong GET event phản ánh trạng thái theo dõi của từng user
+        r = requests.get(f"{BASE_URL}/api/events/{code}", headers=auth2)
+        assert r.json()['event']['is_saved'] is True, 'user2 đã lưu → is_saved=True'
+        r = requests.get(f"{BASE_URL}/api/events/{code}", headers=auth1)
+        assert r.json()['event']['is_saved'] is False, 'owner chưa lưu → is_saved=False'
+        r = requests.get(f"{BASE_URL}/api/events/{code}")
+        assert r.json()['event']['is_saved'] is False, 'ẩn danh → is_saved=False'
+        print("  ✅ GET event trả is_saved đúng theo user")
 
         # Batch trộn mã đã lưu + mã mới: mã đã lưu không được "ăn" mất suất
         # LIMIT của mã mới trong cùng batch
@@ -559,6 +572,9 @@ def test_saved_events(token):
         assert requests.delete(f"{BASE_URL}/api/my-events/{code}",
                                headers=auth2).status_code == 200
         print("  ✅ Gỡ khỏi danh sách không đụng event, idempotent")
+
+        r = requests.get(f"{BASE_URL}/api/events/{code}", headers=auth2)
+        assert r.json()['event']['is_saved'] is False, 'đã gỡ → is_saved phải False'
 
         # Bookmark không mang quyền: event restricted đã lưu (saved_events)
         # không được lộ metadata cho người ngoài qua my-events
