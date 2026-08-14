@@ -592,10 +592,33 @@
             updateAmountPreview();
         });
 
+        // Giữ ?event_code= trên URL khớp với event đang mở (replaceState — không
+        // thêm entry vào history) để copy/refresh URL là ra đúng event. Nhân tiện
+        // dọn tham số key chết từ thời edit key. Route legacy /share/ giữ nguyên.
+        function syncEventCodeInUrl(code) {
+            if (!window.history || !window.history.replaceState) return;
+            if (window.location.pathname.startsWith('/share/')) return;
+            const params = new URLSearchParams(window.location.search);
+            const needsChange = code
+                ? (params.get('event_code') !== code || params.has('key'))
+                : (params.has('event_code') || params.has('key'));
+            if (!needsChange) return;
+            if (code) {
+                params.set('event_code', code);
+            } else {
+                params.delete('event_code');
+            }
+            params.delete('key');
+            const qs = params.toString();
+            window.history.replaceState(null, '',
+                window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
+        }
+
         // Hàm tạo sự kiện mới
         function createNewEvent() {
             localStorage.removeItem('currentEventCode');
             currentEventCode = null;
+            syncEventCodeInUrl(null);
             lastKnownUpdatedAt = null;
             allowEdit = true; // sự kiện mới do chính mình tạo
             $('#loginToEditBanner').addClass('d-none');
@@ -789,6 +812,7 @@
                         if (response.success) {
                             currentEventCode = response.event_code;
                             localStorage.setItem('currentEventCode', currentEventCode);
+                            syncEventCodeInUrl(currentEventCode);
                             $('#eventCodeDisplay').text(currentEventCode);
                             lastKnownUpdatedAt = response.updated_at || null;
                             isOwner = true; // người tạo là chủ sở hữu
@@ -881,11 +905,14 @@
                     // Cập nhật thông tin ngân hàng
                     bankInfo = eventData.bankInfo || {};
 
-                    // Chỉ lưu event_code vào localStorage khi ở chế độ cho phép chỉnh sửa,
-                    // để tránh trường hợp mở link chỉ-xem rồi quay lại "/" vẫn vào được chế độ sửa.
+                    // Lưu event_code của event vừa mở để lần sau vào "/" mở lại đúng
+                    // event đó — quyền sửa do server quyết (can_edit) trên MỖI lần tải
+                    // nên lưu code của event chỉ-xem không cấp thêm quyền gì. Chỉ trừ
+                    // link legacy /share/ (forceViewOnly — luôn chỉ xem, không ghi nhớ).
                     // KHÔNG auto-lưu vào "Sự Kiện Của Tôi" — người dùng chủ động bấm Theo dõi.
-                    if (allowEdit) {
+                    if (!opts.forceViewOnly) {
                         localStorage.setItem('currentEventCode', currentEventCode);
+                        syncEventCodeInUrl(currentEventCode);
                     }
 
                     // Trạng thái nút Theo dõi: đăng nhập → cờ is_saved từ server;
