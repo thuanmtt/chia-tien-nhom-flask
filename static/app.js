@@ -275,12 +275,10 @@
                 // đang mở (nút Theo dõi ở chế độ chỉ xem lưu vào chính danh sách này).
                 $('#configBankInfoBtn').hide();
                 $('#configRatesBtn').hide();
-                $('#saveEventBtn').hide();
                 $('#shareEventBtn').hide();
                 $('#historyBtn').hide();
                 $('#memberForm').hide();
                 $('#expenseForm').hide();
-                $('#calculateBtn').hide();
                 $('#manageCouplesBtn').hide();
                 $('#eventTitle').removeAttr('contenteditable');
                 $('#eventTitle').css('cursor', 'default');
@@ -302,12 +300,10 @@
                 $('#newEventBtn').show();
                 $('#savedEventsBtn').show();
                 $('#configBankInfoBtn').show();
-                $('#saveEventBtn').show();
                 $('#shareEventBtn').show();
                 $('#historyBtn').show();
                 $('#memberForm').show();
                 $('#expenseForm').show();
-                $('#calculateBtn').show();
                 $('#manageCouplesBtn').show();
                 $('#configRatesBtn').show();
                 $('#eventTitle').attr('contenteditable', 'true');
@@ -644,6 +640,7 @@
             renderMembers();
             renderExpenses();
             $('#resultContainer').hide();
+            $('#resultRateWarning').hide();
 
             // Cập nhật UI dựa trên chế độ chỉnh sửa
             updateUIForEditMode();
@@ -685,6 +682,7 @@
             else if (state === 'saved' || state === '') lastSaveFailed = false;
             const $s = $('#saveStatus');
             if (!$s.length) return;
+            $s.removeAttr('role').css('cursor', '');
             if (state === 'saving') {
                 $s.attr('class', 'text-muted ms-2')
                     .html('<i class="fas fa-circle-notch fa-spin me-1"></i>Đang lưu...');
@@ -694,12 +692,20 @@
                 $s.attr('class', 'text-success ms-2')
                     .html(`<i class="fas fa-check me-1"></i>Đã lưu lúc ${pad(d.getHours())}:${pad(d.getMinutes())}`);
             } else if (state === 'error') {
+                // Không còn nút "Lưu" riêng — chính dòng trạng thái là chỗ thử lại
                 $s.attr('class', 'text-danger ms-2')
-                    .html('<i class="fas fa-triangle-exclamation me-1"></i>Chưa lưu được');
+                    .attr('role', 'button')
+                    .css('cursor', 'pointer')
+                    .html('<i class="fas fa-triangle-exclamation me-1"></i>Chưa lưu được — bấm để thử lại');
             } else {
                 $s.attr('class', 'text-muted ms-2').empty();
             }
         }
+
+        // Bấm vào "Chưa lưu được" để lưu lại (thay cho nút Lưu đã bỏ)
+        $(document).on('click', '#saveStatus', function () {
+            if (lastSaveFailed && allowEdit) saveEvent(true);
+        });
 
         // Cảnh báo trước khi rời trang khi còn thay đổi chưa lưu xong:
         // đang lưu dở, có lần lưu đang chờ nối tiếp, hoặc lần lưu gần nhất lỗi.
@@ -1706,6 +1712,7 @@
             } else {
                 // Ẩn kết quả nếu không đủ dữ liệu
                 $('#resultContainer').hide();
+                $('#resultRateWarning').hide();
             }
         }
 
@@ -1998,6 +2005,7 @@
         // (static/split.js, có unit test bằng Node); ở đây chỉ render kết quả.
         function calculateSplit(showErrors = true) {
             lastTransfers = []; // sẽ gán lại bên dưới nếu tính được kết quả
+            $('#resultRateWarning').hide();
 
             if (members.length === 0) {
                 if (showErrors) showToast('Vui lòng thêm ít nhất một thành viên!', 'warning');
@@ -2014,6 +2022,13 @@
             const result = SplitLogic.computeSplit({ members, expenses, couples, rates });
 
             if (result.missingRates.length > 0) {
+                // Không có nút Tính Toán riêng nữa — báo lý do ngay trong khung
+                // kết quả thay vì ẩn im lặng (người xem không sửa được thì
+                // không gợi ý bấm "Tỷ giá")
+                const hint = allowEdit ? ' Bấm nút "Tỷ giá" để thiết lập.' : '';
+                $('#resultRateWarning')
+                    .html(`<i class="fas fa-triangle-exclamation me-1"></i>Chưa tính được kết quả — thiếu tỷ giá cho: <strong>${escapeHtml(result.missingRates.join(', '))}</strong>.${hint}`)
+                    .show();
                 if (showErrors) showToast(`Thiếu tỷ giá cho: ${result.missingRates.join(', ')}. Vui lòng bấm "Tỷ giá" để thiết lập.`, 'warning');
                 $('#resultContainer').hide();
                 return;
@@ -2811,23 +2826,6 @@
             showToast('Đã lưu tỷ giá!', 'success');
         });
         // ======= Hết phần cấu hình tỷ giá =======
-
-        // Vẫn giữ nút tính toán cho trường hợp người dùng muốn tính lại
-        $('#calculateBtn').click(function () {
-            if (!allowEdit) return; // Không cho phép tính toán nếu ở chế độ chỉ xem
-
-            calculateSplit(true); // Hiển thị thông báo lỗi nếu có
-            if ($('#resultContainer').is(':visible')) {
-                showToast('Đã tính toán chia tiền!', 'success');
-            }
-        });
-
-        // Xử lý lưu sự kiện (hiện thông báo)
-        $('#saveEventBtn').click(function () {
-            if (!allowEdit) return; // Không cho phép lưu nếu ở chế độ chỉ xem
-            
-            saveEvent(true);
-        });
 
         // Xử lý khi người dùng chỉnh sửa tên sự kiện
         $('#eventTitle').on('blur', function () {
