@@ -268,8 +268,9 @@
         // Ẩn/hiện các nút dựa trên allowEdit
         function updateUIForEditMode() {
             if (!allowEdit) {
-                // Ẩn các nút và form chỉnh sửa
-                $('#savedEventsBtn').hide();
+                // Ẩn các nút và form chỉnh sửa. "Sự Kiện Của Tôi" KHÔNG ẩn —
+                // danh sách theo tài khoản/máy, không phụ thuộc quyền sửa event
+                // đang mở (nút Theo dõi ở chế độ chỉ xem lưu vào chính danh sách này).
                 $('#configBankInfoBtn').hide();
                 $('#configRatesBtn').hide();
                 $('#saveEventBtn').hide();
