@@ -1,7 +1,7 @@
 """Kiểm tra & chuẩn hoá payload sự kiện từ client.
 
-Dùng chung cho app.py (SQLite) và vercel_app.py (Postgres) để hai bản
-không bị lệch nhau ở phần validate — phần quan trọng về bảo mật.
+Mọi body POST/PUT event của vercel_app.py đều đi qua validate_event_payload —
+type check + cap kích thước, message tiếng Việt an toàn để trả client (400).
 """
 
 import math
@@ -16,6 +16,7 @@ MAX_DATE_LEN = 40
 MAX_AMOUNT = 1e15
 MAX_COUPLES = 50
 MAX_RATES = 100
+MAX_SETTLEMENTS = 200
 MAX_BANK_CODE_LEN = 20
 MAX_BANK_ACCOUNT_LEN = 50
 
@@ -128,6 +129,27 @@ def _clean_couples(raw):
     return cleaned
 
 
+def _clean_settlements(raw):
+    """Đánh dấu "đã chuyển tiền": mỗi mục khớp ĐÚNG một giao dịch trong kết quả
+    chia tiền theo (from, to, amount) — số dư đổi thì mất khớp và coi như chưa
+    đánh dấu (đúng ngữ nghĩa: giao dịch cũ không còn tồn tại)."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or len(raw) > MAX_SETTLEMENTS:
+        raise ValidationError('Danh sách đánh dấu đã chuyển không hợp lệ')
+    cleaned = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValidationError('Đánh dấu đã chuyển không hợp lệ')
+        cleaned.append({
+            'from': _clean_str(item.get('from'), MAX_NAME_LEN, 'Người chuyển', allow_empty=False),
+            'to': _clean_str(item.get('to'), MAX_NAME_LEN, 'Người nhận', allow_empty=False),
+            'amount': _clean_amount(item.get('amount', 0), 'Số tiền'),
+            'settled_time': _clean_str(item.get('settled_time'), MAX_DATE_LEN, 'Thời gian đánh dấu'),
+        })
+    return cleaned
+
+
 def _clean_rates(raw):
     if raw is None:
         return {}
@@ -163,4 +185,5 @@ def validate_event_payload(data):
         'bankInfo': _clean_bank_info(data.get('bankInfo', {})),
         'couples': _clean_couples(data.get('couples', [])),
         'rates': _clean_rates(data.get('rates', {})),
+        'settlements': _clean_settlements(data.get('settlements', [])),
     }

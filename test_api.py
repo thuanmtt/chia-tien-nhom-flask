@@ -6,6 +6,7 @@ Test script cho Flask app
 import os
 import secrets
 import sys
+import time
 
 import requests
 
@@ -25,6 +26,21 @@ SUPABASE_ANON_KEY = os.environ.get('SUPABASE_ANON_KEY', '')
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY', '')
 
 import psycopg2
+
+
+def _delete_event(code, headers=None):
+    """DELETE event, tự đợi khi dính rate limit của chính endpoint (10/phút):
+    suite dồn cleanup về cuối nên có thể vượt limiter — đó là pacing của test,
+    không phải lỗi API. Chỉ dùng cho DELETE kỳ vọng thành công/cleanup."""
+    r = None
+    for _ in range(5):
+        r = requests.delete(f"{BASE_URL}/api/events/{code}", headers=headers or {})
+        if r.status_code != 429:
+            return r
+        wait = r.headers.get('Retry-After')
+        wait = int(wait) if wait and wait.isdigit() else 15
+        time.sleep(min(wait, 70) + 1)
+    return r
 
 
 def _db_execute(sql, params):
@@ -280,16 +296,13 @@ def test_delete_event(event_code, token):
     """Test xóa sự kiện — chỉ owner (không còn edit key)"""
     print(f"Testing delete event API for {event_code}...")
 
-    response = requests.delete(f"{BASE_URL}/api/events/{event_code}")
+    response = _delete_event(event_code)  # không token — retry nếu dính 429
     if response.status_code != 401:
         print(f"❌ Delete without token should be 401, got {response.status_code}")
         return False
     print("✅ Delete without token correctly rejected (401)")
 
-    response = requests.delete(
-        f"{BASE_URL}/api/events/{event_code}",
-        headers={'Authorization': f'Bearer {token}'}
-    )
+    response = _delete_event(event_code, {'Authorization': f'Bearer {token}'})
 
     if response.status_code == 200 and response.json().get('success'):
         print("✅ Delete event OK")
@@ -399,8 +412,7 @@ def test_auth_matrix(token):
         r = requests.put(f"{BASE_URL}/api/events/{code}", json=put_doc,
                          headers={'Authorization': f'Bearer {token2}'})
         assert r.status_code == 200, f'link-editor PUT phải 200, được {r.status_code}'
-        r = requests.delete(f"{BASE_URL}/api/events/{code}",
-                            headers={'Authorization': f'Bearer {token2}'})
+        r = _delete_event(code, {'Authorization': f'Bearer {token2}'})
         assert r.status_code == 403, f'link-editor DELETE phải 403, được {r.status_code}'
         print("  ✅ link-editor: PUT 200, DELETE 403")
 
@@ -414,8 +426,7 @@ def test_auth_matrix(token):
         print("  ✅ /api/my-events đúng theo vai")
 
         # 8. Dọn: owner xóa được
-        r = requests.delete(f"{BASE_URL}/api/events/{code}",
-                            headers={'Authorization': f'Bearer {token}'})
+        r = _delete_event(code, {'Authorization': f'Bearer {token}'})
         assert r.status_code == 200, f'owner DELETE phải 200, được {r.status_code}'
         print("✅ Auth matrix OK")
         return True
@@ -468,16 +479,14 @@ def test_ownerless_event(token):
         assert r.status_code == 400, f'restricted cho event không chủ phải 400, được {r.status_code}'
 
         # User bất kỳ đã đăng nhập: xóa được
-        r = requests.delete(f"{BASE_URL}/api/events/{code}",
-                            headers={'Authorization': f'Bearer {token2}'})
+        r = _delete_event(code, {'Authorization': f'Bearer {token2}'})
         assert r.status_code == 200, f'DELETE event không chủ phải 200, được {r.status_code}'
         code = None
         print("✅ Event không chủ: sửa/xóa được khi đăng nhập, chặn restricted")
         return True
     finally:
         if code:
-            requests.delete(f"{BASE_URL}/api/events/{code}",
-                            headers={'Authorization': f'Bearer {token}'})
+            _delete_event(code, {'Authorization': f'Bearer {token}'})
         delete_test_user(user2_id)
 
 def test_saved_events(token):
@@ -597,7 +606,7 @@ def test_saved_events(token):
 
         # Xóa event → dòng saved_events mất theo (CASCADE): lưu lại rồi xóa event
         requests.post(f"{BASE_URL}/api/my-events/save", json={'codes': [code]}, headers=auth2)
-        r = requests.delete(f"{BASE_URL}/api/events/{code}", headers=auth1)
+        r = _delete_event(code, auth1)
         assert r.status_code == 200
         r = requests.get(f"{BASE_URL}/api/my-events", headers=auth2)
         assert code not in [e['event_code'] for e in r.json()['events']], \
@@ -607,9 +616,9 @@ def test_saved_events(token):
         return True
     finally:
         if code:
-            requests.delete(f"{BASE_URL}/api/events/{code}", headers=auth1)
+            _delete_event(code, auth1)
         if code2:
-            requests.delete(f"{BASE_URL}/api/events/{code2}", headers=auth1)
+            _delete_event(code2, auth1)
         delete_test_user(user2_id)
 
 def test_revisions_and_restore(token):
@@ -710,7 +719,76 @@ def test_revisions_and_restore(token):
         print("✅ Revisions & restore OK")
         return True
     finally:
-        requests.delete(f"{BASE_URL}/api/events/{code}", headers=auth)
+        _delete_event(code, auth)
+
+def test_settlements_and_revision_preview(token):
+    """Đánh dấu "đã chuyển tiền" (round-trip settlements) + xem trước phiên bản."""
+    print("Testing settlements & revision preview...")
+    auth = {'Authorization': f'Bearer {token}'}
+    base_doc = {
+        "title": "Settle Test", "members": ["An", "Bình"],
+        "expenses": [{"title": "Ăn trưa", "amount": 200000, "currency": "VND",
+                      "payer": "An", "benefitType": "selected",
+                      "beneficiaries": ["An", "Bình"],
+                      "expense_date": "", "created_time": "s1", "updated_time": ""}],
+    }
+    r = requests.post(f"{BASE_URL}/api/events", json=base_doc, headers=auth)
+    assert r.status_code == 200, r.text
+    code, updated_at = r.json()['event_code'], r.json()['updated_at']
+    try:
+        # 1. Event mới: settlements mặc định []
+        ev = requests.get(f"{BASE_URL}/api/events/{code}", headers=auth).json()['event']
+        assert ev['settlements'] == [], ev.get('settlements')
+
+        # 2. PUT kèm settlements → GET trả lại đúng (round-trip qua bảng settlements)
+        doc2 = dict(base_doc)
+        doc2['settlements'] = [{'from': 'Bình', 'to': 'An', 'amount': 100000,
+                                'settled_time': '2026-08-14T10:00:00.000Z'}]
+        doc2['expectedUpdatedAt'] = updated_at
+        r = requests.put(f"{BASE_URL}/api/events/{code}", json=doc2, headers=auth)
+        assert r.status_code == 200, r.text
+        updated_at = r.json()['updated_at']
+        ev = requests.get(f"{BASE_URL}/api/events/{code}", headers=auth).json()['event']
+        assert ev['settlements'] == doc2['settlements'], ev['settlements']
+        print("  ✅ settlements round-trip qua PUT/GET")
+
+        # 3. Revision mới nhất ghi dòng "Đánh dấu đã chuyển"
+        revs = requests.get(f"{BASE_URL}/api/events/{code}/revisions", headers=auth).json()['revisions']
+        assert any('Đánh dấu đã chuyển' in t for t in revs[0]['summary']), revs[0]['summary']
+        print("  ✅ revision ghi hành động đánh dấu đã chuyển")
+
+        # 4. Preview phiên bản 'create': nội dung snapshot + changes so với hiện tại
+        create_rev = revs[-1]
+        assert create_rev['kind'] == 'create'
+        r = requests.get(f"{BASE_URL}/api/events/{code}/revisions/{create_rev['id']}",
+                         headers=auth)
+        assert r.status_code == 200, r.text
+        rev = r.json()['revision']
+        p = rev['preview']
+        assert p['title'] == 'Settle Test' and p['members'] == ['An', 'Bình'], p
+        assert p['expense_count'] == 1 and p['expenses'][0]['title'] == 'Ăn trưa', p
+        assert 'bankInfo' not in p, 'preview không được kèm bankInfo'
+        # Khôi phục bản create = bỏ đánh dấu đã chuyển hiện tại
+        assert any('Bỏ đánh dấu đã chuyển' in t for t in rev['changes']), rev['changes']
+        print("  ✅ preview: snapshot rút gọn + changes so với bản hiện tại")
+
+        # 5. Quyền & input: không token 401, id rác 404, user lạ (viewer link) 403
+        r = requests.get(f"{BASE_URL}/api/events/{code}/revisions/{create_rev['id']}")
+        assert r.status_code == 401, f'preview không token phải 401, được {r.status_code}'
+        r = requests.get(f"{BASE_URL}/api/events/{code}/revisions/khong-uuid", headers=auth)
+        assert r.status_code == 404, f'id rác phải 404, được {r.status_code}'
+        user2_id, token2, _ = create_test_user()
+        try:
+            r = requests.get(f"{BASE_URL}/api/events/{code}/revisions/{create_rev['id']}",
+                             headers={'Authorization': f'Bearer {token2}'})
+            assert r.status_code == 403, f'người không quyền sửa phải 403, được {r.status_code}'
+        finally:
+            delete_test_user(user2_id)
+        print("  ✅ preview: 401/404/403 đúng")
+        print("✅ Settlements & revision preview OK")
+        return True
+    finally:
+        _delete_event(code, auth)
 
 def test_collaborators(token, owner_email):
     """Người được mời đích danh: quyền cộng dồn, owner-only, resolve email/username, lịch sử."""
@@ -761,7 +839,7 @@ def test_collaborators(token, owner_email):
         put_doc['title'] = 'Collab Test sửa'
         r = requests.put(f"{BASE_URL}/api/events/{code}", json=put_doc, headers=auth2)
         assert r.status_code == 200, f'editor PUT phải 200, được {r.status_code}: {r.text}'
-        r = requests.delete(f"{BASE_URL}/api/events/{code}", headers=auth2)
+        r = _delete_event(code, auth2)
         assert r.status_code == 403, f'editor DELETE event phải 403, được {r.status_code}'
         r = requests.get(f"{BASE_URL}/api/events/{code}/collaborators", headers=auth2)
         assert r.status_code == 403, 'không phải owner không xem được danh sách'
@@ -810,7 +888,7 @@ def test_collaborators(token, owner_email):
         return True
     finally:
         delete_test_user(user2_id)
-        requests.delete(f"{BASE_URL}/api/events/{code}", headers=auth)
+        _delete_event(code, auth)
 
 def main():
     """Chạy tất cả tests. Trả True khi TẤT CẢ pass — main exit code khác 0 khi
@@ -844,6 +922,8 @@ def main():
         if not test_saved_events(token):
             return False
         if not test_revisions_and_restore(token):
+            return False
+        if not test_settlements_and_revision_preview(token):
             return False
         if not test_collaborators(token, owner_email):
             return False

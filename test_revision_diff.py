@@ -145,6 +145,32 @@ def test_cap_10_actions():
     print('✅ cap 10 hành động + dòng "… và N thay đổi khác"')
 
 
+def test_max_actions_param():
+    # Preview phiên bản dùng cap cao hơn — max_actions phải tôn trọng tham số
+    old = {'title': 'X', 'members': [], 'expenses': [], 'bankInfo': {},
+           'couples': [], 'rates': {}}
+    new = dict(old, members=[f'TV{i}' for i in range(15)])
+    actions = diff_documents(old, new, max_actions=50)
+    assert len(actions) == 15 and all(a['a'] == 'add' for a in actions)
+    print('✅ max_actions tùy chỉnh (preview) không bị cap 10')
+
+
+def test_settlements_diff():
+    old = copy.deepcopy(BASE)
+    old['settlements'] = [{'from': 'Bình', 'to': 'An', 'amount': 750000, 'settled_time': 't1'}]
+    new = copy.deepcopy(BASE)
+    new['settlements'] = [{'from': 'Bình', 'to': 'Chi', 'amount': 200000, 'settled_time': 't2'}]
+    texts = _texts(diff_documents(old, new))
+    assert "Đánh dấu đã chuyển: 'Bình' → 'Chi' (200.000 đ)" in texts
+    assert "Bỏ đánh dấu đã chuyển: 'Bình' → 'An' (750.000 đ)" in texts
+    assert len(texts) == 2
+    # settled_time đổi nhưng cùng (from, to, amount) → không phải thay đổi
+    same = copy.deepcopy(old)
+    same['settlements'] = [dict(old['settlements'][0], settled_time='t9')]
+    assert diff_documents(old, same) == []
+    print('✅ diff settlements: đánh dấu / bỏ đánh dấu / đổi mỗi settled_time → bỏ qua')
+
+
 if __name__ == '__main__':
     test_no_change()
     test_updated_time_only_ignored()
@@ -157,5 +183,7 @@ if __name__ == '__main__':
     test_foreign_currency_format()
     test_bank_couple_rate_changes()
     test_cap_10_actions()
+    test_max_actions_param()
+    test_settlements_diff()
     print('\n🎉 test_revision_diff: tất cả pass')
     sys.exit(0)

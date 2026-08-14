@@ -25,6 +25,8 @@
             return '<span class="badge bg-warning text-dark">Chưa có</span>';
         }
         let ratesDraft = {}; // bản nháp khi mở modal
+        let settlements = []; // [{from, to, amount, settled_time}] — giao dịch đã đánh dấu "đã chuyển"
+        let lastTransfers = []; // transfers của lần tính gần nhất (nút Copy + đánh dấu đã chuyển)
         let sortOrder = 'newest'; // 'newest' hoặc 'oldest'
         let allowEdit = true; // Mặc định cho phép sửa
         const EXPENSE_PAGE_SIZE = 10;
@@ -636,6 +638,8 @@
             bankInfo = {};
             couples = [];
             rates = {};
+            settlements = [];
+            lastTransfers = [];
             renderCurrencyDropdown();
             renderMembers();
             renderExpenses();
@@ -738,7 +742,8 @@
                 expenses: expenses,
                 bankInfo: bankInfo,
                 couples: couples,
-                rates: rates
+                rates: rates,
+                settlements: settlements
             };
 
             function finishSave() {
@@ -905,6 +910,9 @@
                     // Cập nhật thông tin ngân hàng
                     bankInfo = eventData.bankInfo || {};
 
+                    // Giao dịch đã đánh dấu "đã chuyển" (event cũ chưa có key này)
+                    settlements = Array.isArray(eventData.settlements) ? eventData.settlements : [];
+
                     // Lưu event_code của event vừa mở để lần sau vào "/" mở lại đúng
                     // event đó — quyền sửa do server quyết (can_edit) trên MỖI lần tải
                     // nên lưu code của event chỉ-xem không cấp thêm quyền gì. Chỉ trừ
@@ -979,15 +987,27 @@
             autoCalculate();
         }
 
-        // Hàm sắp xếp danh sách chi phí
+        // Sắp xếp danh sách chi phí theo THỜI GIAN THẬT đã lưu trên server:
+        // ngày phát sinh (expense_date) trước, cùng ngày thì theo thời gian tạo
+        // (created_time), cuối cùng giữ thứ tự nhập cho ổn định. Nhập bù một
+        // khoản của hôm qua sẽ nằm đúng chỗ thay vì luôn trên cùng.
+        function expenseTimeKeys(expense) {
+            const createdMs = Date.parse(expense.created_time || '') || 0;
+            // Thiếu ngày phát sinh → dùng ngày của thời điểm tạo
+            const dateMs = Date.parse(expense.expense_date || '')
+                || Date.parse((expense.created_time || '').slice(0, 10))
+                || 0;
+            return { dateMs, createdMs };
+        }
+
         function sortExpenses() {
-            if (sortOrder === 'newest') {
-                // Sắp xếp theo thứ tự mới nhất (đảo ngược)
-                return [...expenses].reverse();
-            } else {
-                // Sắp xếp theo thứ tự cũ nhất (giữ nguyên thứ tự hiện tại)
-                return [...expenses];
-            }
+            const dir = sortOrder === 'newest' ? -1 : 1;
+            return expenses
+                .map((e, i) => ({ e, i, k: expenseTimeKeys(e) }))
+                .sort((a, b) => dir * ((a.k.dateMs - b.k.dateMs)
+                    || (a.k.createdMs - b.k.createdMs)
+                    || (a.i - b.i)))
+                .map(x => x.e);
         }
 
         // Chuẩn hoá Tiếng Việt → không dấu, để search "do an" khớp "đồ ăn"
@@ -1937,8 +1957,48 @@
         }
 
         // Thuật toán chia tiền — toàn bộ tính toán nằm trong SplitLogic.computeSplit
+        // Đánh dấu "đã chuyển tiền": một giao dịch được coi là đã chuyển khi có
+        // mục settlements khớp ĐÚNG (from, to, amount). Kết quả chia đổi (thêm/
+        // sửa chi phí làm amount đổi) → hết khớp, tự về trạng thái chưa chuyển.
+        function findSettlementIndex(transfer) {
+            return settlements.findIndex(s => s
+                && s.from === transfer.from
+                && s.to === transfer.to
+                && Number(s.amount) === transfer.amount);
+        }
+
+        $(document).on('click', '.settle-transfer-btn', function () {
+            if (!allowEdit) return;
+            const transfer = lastTransfers[$(this).data('tindex')];
+            if (!transfer) return;
+            const idx = findSettlementIndex(transfer);
+            if (idx === -1) {
+                // Chạm trần validation (200 mục) → dọn các mục "mồ côi" không còn
+                // khớp giao dịch nào trước khi thêm
+                if (settlements.length >= 200) {
+                    settlements = settlements.filter(s =>
+                        lastTransfers.some(t => t.from === s.from && t.to === s.to
+                            && t.amount === Number(s.amount)));
+                }
+                settlements.push({
+                    from: transfer.from,
+                    to: transfer.to,
+                    amount: transfer.amount,
+                    settled_time: new Date().toISOString()
+                });
+                showToast(`Đã đánh dấu "${transfer.from} → ${transfer.to}" là đã chuyển.`, 'success');
+            } else {
+                settlements.splice(idx, 1);
+                showToast(`Đã bỏ đánh dấu "${transfer.from} → ${transfer.to}".`, 'success');
+            }
+            calculateSplit(false);
+            saveEvent(false);
+        });
+
         // (static/split.js, có unit test bằng Node); ở đây chỉ render kết quả.
         function calculateSplit(showErrors = true) {
+            lastTransfers = []; // sẽ gán lại bên dưới nếu tính được kết quả
+
             if (members.length === 0) {
                 if (showErrors) showToast('Vui lòng thêm ít nhất một thành viên!', 'warning');
                 $('#resultContainer').hide();
@@ -1996,19 +2056,30 @@
 
             // Hiển thị các giao dịch chuyển tiền
             $('#transfersList').empty();
+            lastTransfers = result.transfers;
 
             if (result.transfers.length === 0) {
                 $('#transfersList').append('<p class="text-muted">Không cần chuyển tiền.</p>');
             } else {
-                result.transfers.forEach(transfer => {
+                result.transfers.forEach((transfer, tIdx) => {
+                    const settled = findSettlementIndex(transfer) !== -1;
+                    // Người có quyền sửa: nút toggle; người chỉ xem: badge tĩnh
+                    const settleControl = allowEdit
+                        ? `<button class="btn btn-sm ${settled ? 'btn-success' : 'btn-outline-secondary'} settle-transfer-btn" data-tindex="${tIdx}">
+                               <i class="fas fa-check me-1"></i>${settled ? 'Đã chuyển ✓' : 'Đánh dấu đã chuyển'}
+                           </button>`
+                        : (settled ? '<span class="badge bg-success align-self-center"><i class="fas fa-check me-1"></i>Đã chuyển</span>' : '');
                     $('#transfersList').append(`
-            <div class="transfer-item">
-                <i class="fas fa-exchange-alt me-2"></i>
-                <strong>${escapeHtml(transfer.from)}</strong> chuyển <strong>${formatCurrency(transfer.amount)}</strong> cho <strong>${escapeHtml(transfer.to)}</strong>
-                <div class="mt-2">
+            <div class="transfer-item${settled ? ' settled' : ''}">
+                <span class="transfer-text">
+                    <i class="fas fa-exchange-alt me-2"></i>
+                    <strong>${escapeHtml(transfer.from)}</strong> chuyển <strong>${formatCurrency(transfer.amount)}</strong> cho <strong>${escapeHtml(transfer.to)}</strong>
+                </span>
+                <div class="mt-2 d-flex flex-wrap gap-2">
                     <button class="btn btn-sm btn-outline-primary generate-qr-btn" data-from="${escapeHtml(transfer.from)}" data-to="${escapeHtml(transfer.to)}" data-amount="${transfer.amount}">
                         <i class="fas fa-qrcode me-1"></i> Bấm vào đây để tạo QR chuyển tiền
                     </button>
+                    ${settleControl}
                 </div>
             </div>
             `);
@@ -2954,6 +3025,11 @@
                 const badge = REVISION_KIND_BADGE[rev.kind] || '';
                 const summaryHtml = (rev.summary || [])
                     .map(t => `<div class="small text-body-secondary">${escapeHtml(t)}</div>`).join('');
+                const previewBtn = `
+                    <button class="btn btn-sm btn-outline-secondary history-preview-btn"
+                            data-id="${escapeHtml(rev.id)}">
+                        <i class="fas fa-eye me-1"></i>Xem
+                    </button>`;
                 const restoreBtn = idx === 0 ? '' : `
                     <button class="btn btn-sm btn-outline-warning history-restore-btn"
                             data-id="${escapeHtml(rev.id)}" data-time="${escapeHtml(rev.created_at || '')}">
@@ -2968,11 +3044,67 @@
                                 </div>
                                 ${summaryHtml}
                             </div>
-                            <div class="ms-2 flex-shrink-0">${restoreBtn}</div>
+                            <div class="ms-2 flex-shrink-0 d-flex gap-1">${previewBtn}${restoreBtn}</div>
                         </div>
+                        <div class="history-preview d-none mt-2"></div>
                     </li>`);
             });
         }
+
+        // Panel xem trước một phiên bản: nội dung snapshot (rút gọn) + những gì
+        // "Khôi phục bản này" sẽ thay đổi so với bản hiện tại
+        function renderRevisionPreview(rev) {
+            const p = rev.preview || {};
+            const changes = rev.changes || [];
+            const changesHtml = changes.length
+                ? changes.map(t => `<li>${escapeHtml(t)}</li>`).join('')
+                : '<li class="text-muted">Giống hệt bản hiện tại — khôi phục sẽ không thay đổi gì.</li>';
+            const membersText = (p.members || []).join(', ');
+            const expenses = p.expenses || [];
+            const expHtml = expenses.map(e => {
+                const extra = [e.payer ? `${e.payer} trả` : '', formatExpenseDateForDisplay(e.expense_date)]
+                    .filter(Boolean).join(', ');
+                return `<li>${escapeHtml(e.title || '(không tên)')} — ${escapeHtml(formatAmountWithCurrency(e.amount || 0, e.currency))}${extra ? ` <span class="text-muted">(${escapeHtml(extra)})</span>` : ''}</li>`;
+            }).join('');
+            const moreExp = (p.expense_count || 0) > expenses.length
+                ? `<li class="text-muted">… và ${p.expense_count - expenses.length} khoản khác</li>` : '';
+            return `
+                <div class="small">
+                    <div class="fw-bold mb-1"><i class="fas fa-rotate-left me-1"></i>Khôi phục bản này sẽ:</div>
+                    <ul class="mb-2 ps-3">${changesHtml}</ul>
+                    <div class="fw-bold mb-1"><i class="fas fa-file-lines me-1"></i>Nội dung phiên bản</div>
+                    <div>Tên sự kiện: <strong>${escapeHtml(p.title || '')}</strong></div>
+                    <div>Thành viên (${(p.members || []).length}): ${escapeHtml(membersText) || '<span class="text-muted">không có</span>'}</div>
+                    <div>Khoản chi (${p.expense_count || 0}):</div>
+                    <ul class="mb-0 ps-3 history-preview-expenses">${expHtml || '<li class="text-muted">không có</li>'}${moreExp}</ul>
+                </div>`;
+        }
+
+        $(document).on('click', '.history-preview-btn', function () {
+            const revisionId = $(this).attr('data-id');
+            const $panel = $(this).closest('li').find('.history-preview');
+            if (!$panel.hasClass('d-none')) {
+                $panel.addClass('d-none'); // toggle đóng
+                return;
+            }
+            $panel.removeClass('d-none');
+            if ($panel.data('loaded')) return; // đã tải rồi — chỉ mở lại
+            $panel.html('<div class="text-muted small"><i class="fas fa-circle-notch fa-spin me-1"></i>Đang tải phiên bản...</div>');
+            $.ajax({
+                url: `/api/events/${currentEventCode}/revisions/${encodeURIComponent(revisionId)}`,
+                headers: AppAuth.authHeaders(),
+                success: function (res) {
+                    if (res.success && res.revision) {
+                        $panel.data('loaded', true).html(renderRevisionPreview(res.revision));
+                    } else {
+                        $panel.html('<div class="text-danger small">Không tải được phiên bản này.</div>');
+                    }
+                },
+                error: function () {
+                    $panel.html('<div class="text-danger small">Không tải được phiên bản này.</div>');
+                }
+            });
+        });
 
         function loadHistory() {
             $('#historyLoading').removeClass('d-none');
@@ -3122,30 +3254,22 @@
         // Xử lý sao chép giao dịch (cho phép cả ở chế độ chỉ xem — người nhận
         // link chính là người cần danh sách chuyển tiền)
         $('#copyTransfersBtn').click(function () {
-            if ($('#transfersList').children().length === 0 ||
-                $('#transfersList').text().includes('Không cần chuyển tiền')) {
+            if (lastTransfers.length === 0) {
                 showToast('Không có giao dịch nào để sao chép!', 'warning');
                 return;
             }
 
-            // Tạo nội dung để sao chép
-            let copyContent = `GIAO DỊCH CẦN THỰC HIỆN - ${$('#eventTitle').text()}\n\n`;
-
-            $('#transfersList .transfer-item').each(function () {
-                // Loại bỏ icon và format lại text
-                const transferText = $(this).text().trim().replace('ị ', 'ị: ');
-                copyContent += transferText + '\n';
+            // Build từ dữ liệu tính toán (lastTransfers) — KHÔNG scrape DOM:
+            // trong .transfer-item còn có nút QR/đánh dấu, text() sẽ dính rác
+            const lines = lastTransfers.map(t => {
+                const mark = findSettlementIndex(t) !== -1 ? ' (đã chuyển)' : '';
+                return `${t.from} chuyển ${formatCurrency(t.amount)} cho ${t.to}${mark}`;
             });
+            const copyContent = `GIAO DỊCH CẦN THỰC HIỆN - ${$('#eventTitle').text()}\n\n${lines.join('\n')}`;
 
-            // Copy vào clipboard
-            navigator.clipboard.writeText(copyContent)
-                .then(() => {
-                    showToast('Đã sao chép các giao dịch thành công!', 'success');
-                })
-                .catch(err => {
-                    console.error('Không thể sao chép: ', err);
-                    showToast('Không thể sao chép. Vui lòng thử lại sau!', 'warning');
-                });
+            // copyTextToClipboard có sẵn fallback execCommand cho môi trường
+            // không có navigator.clipboard (HTTP/WebView cũ)
+            copyTextToClipboard(copyContent, 'Đã sao chép các giao dịch thành công!');
         });
 
         // ===== Modal chia sẻ kiểu Google Docs =====

@@ -49,7 +49,8 @@ def test_shape_khop_document_store():
     """Shape output phải khớp document compose từ DB (update_event so sánh
     old_doc == data để nhận no-op — lệch key là no-op detection chết)."""
     doc = validate_event_payload({'members': [], 'expenses': []})
-    assert set(doc.keys()) == {'title', 'members', 'expenses', 'bankInfo', 'couples', 'rates'}
+    assert set(doc.keys()) == {'title', 'members', 'expenses', 'bankInfo', 'couples',
+                               'rates', 'settlements'}
     doc2 = validate_event_payload({
         'expenses': [{'title': 'x', 'amount': 1, 'beneficiaries': []}], 'members': []})
     assert set(doc2['expenses'][0].keys()) == {
@@ -121,6 +122,29 @@ def test_couples_va_rates():
     print('✅ couples + rates')
 
 
+def test_settlements():
+    from validation import MAX_SETTLEMENTS
+    doc = validate_event_payload({'members': [], 'expenses': [], 'settlements': [
+        {'from': ' An ', 'to': 'Bình', 'amount': 500000, 'settled_time': '2026-08-14T10:00:00Z'},
+    ]})
+    assert doc['settlements'] == [{'from': 'An', 'to': 'Bình', 'amount': 500000,
+                                   'settled_time': '2026-08-14T10:00:00Z'}]
+    # Event cũ không có key → mặc định []
+    assert validate_event_payload({'members': [], 'expenses': []})['settlements'] == []
+    assert validate_event_payload({'members': [], 'expenses': [],
+                                   'settlements': None})['settlements'] == []
+    expect_error({'members': [], 'expenses': [], 'settlements': 'x'}, 'đã chuyển')
+    expect_error({'members': [], 'expenses': [], 'settlements': [None]}, 'đã chuyển')
+    expect_error({'members': [], 'expenses': [],
+                  'settlements': [{'from': '', 'to': 'B', 'amount': 1}]}, 'trống')
+    expect_error({'members': [], 'expenses': [],
+                  'settlements': [{'from': 'A', 'to': 'B', 'amount': '1'}]}, 'Số tiền')
+    expect_error({'members': [], 'expenses': [],
+                  'settlements': [{'from': 'A', 'to': 'B', 'amount': 1}] * (MAX_SETTLEMENTS + 1)},
+                 'đã chuyển')
+    print('✅ settlements: chuẩn hoá / mặc định / kiểu / cap')
+
+
 if __name__ == '__main__':
     test_happy_path()
     test_shape_khop_document_store()
@@ -130,4 +154,5 @@ if __name__ == '__main__':
     test_expenses()
     test_bank_info()
     test_couples_va_rates()
+    test_settlements()
     print('\n🎉 test_validation: tất cả pass')

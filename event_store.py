@@ -6,9 +6,10 @@ Document (đầu ra của validate_event_payload):
                expense_date, created_time, updated_time}],
    bankInfo: {tên: {bank, account}},
    couples: [{id, label, members, primary}],
-   rates: {mã: {rate, source, rateDate, rateType, currencyName}}}
+   rates: {mã: {rate, source, rateDate, rateType, currencyName}},
+   settlements: [{from, to, amount, settled_time}]}
 
-Phần "rows" trung gian là dict 7 key theo bảng; beneficiaries/couple_members nối
+Phần "rows" trung gian là dict 8 key theo bảng; beneficiaries/couple_members nối
 với expense/couple qua *_position (vì id do DB sinh, chưa có ở tầng thuần).
 """
 
@@ -73,6 +74,23 @@ def document_to_rows(data):
                 'couple_position': i, 'member_name': name, 'position': j,
             })
 
+    # Khử trùng lặp theo (from, to, amount) — PK của bảng settlements; toggle
+    # phía client vốn giữ tối đa 1 mục/giao dịch, đây là chốt chặn cuối.
+    settlement_rows = []
+    seen_settlements = set()
+    for s in (data.get('settlements') or []):
+        key = (s.get('from', ''), s.get('to', ''), s.get('amount', 0))
+        if key in seen_settlements:
+            continue
+        seen_settlements.add(key)
+        settlement_rows.append({
+            'from_name': s.get('from', ''),
+            'to_name': s.get('to', ''),
+            'amount': s.get('amount', 0),
+            'settled_time': s.get('settled_time', ''),
+            'position': len(settlement_rows),
+        })
+
     rate_rows = [
         {
             'currency_code': code,
@@ -93,6 +111,7 @@ def document_to_rows(data):
         'couples': couple_rows,
         'couple_members': couple_member_rows,
         'event_rates': rate_rows,
+        'settlements': settlement_rows,
     }
 
 
@@ -161,12 +180,23 @@ def rows_to_document(rows):
         for r in rows.get('event_rates', [])
     }
 
+    settlements = [
+        {
+            'from': r['from_name'],
+            'to': r['to_name'],
+            'amount': _num(r['amount']),
+            'settled_time': r['settled_time'],
+        }
+        for r in sorted(rows.get('settlements', []), key=lambda r: r['position'])
+    ]
+
     return {
         'members': members,
         'expenses': expenses,
         'bankInfo': bank_info,
         'couples': couples,
         'rates': rates,
+        'settlements': settlements,
     }
 
 
@@ -186,6 +216,7 @@ def replace_event_children(cursor, event_id, data):
     cursor.execute('DELETE FROM members WHERE event_id = %s', (event_id,))
     cursor.execute('DELETE FROM member_bank_info WHERE event_id = %s', (event_id,))
     cursor.execute('DELETE FROM event_rates WHERE event_id = %s', (event_id,))
+    cursor.execute('DELETE FROM settlements WHERE event_id = %s', (event_id,))
 
     if rows['members']:
         psycopg2.extras.execute_values(
@@ -262,8 +293,21 @@ def replace_event_children(cursor, event_id, data):
             ],
         )
 
+    if rows['settlements']:
+        psycopg2.extras.execute_values(
+            cursor,
+            '''INSERT INTO settlements (event_id, from_name, to_name, amount,
+                                        settled_time, position)
+               VALUES %s''',
+            [
+                (event_id, r['from_name'], r['to_name'], r['amount'],
+                 r['settled_time'], r['position'])
+                for r in rows['settlements']
+            ],
+        )
 
-# MỘT câu SELECT trả cả 7 bảng con dạng JSON array (1 round-trip thay vì 7 —
+
+# MỘT câu SELECT trả cả 8 bảng con dạng JSON array (1 round-trip thay vì 8 —
 # đáng kể trên serverless vì query chạy tuần tự). Alias trùng tên key mà
 # rows_to_document nhận; json_agg trả NULL khi bảng rỗng nên coalesce về '[]'.
 # numeric (amount, rate) thành JSON number → psycopg2 parse ra float, khớp _num().
@@ -302,7 +346,11 @@ SELECT
         'currency_code', currency_code, 'rate', rate, 'source', source,
         'rate_date', rate_date, 'rate_type', rate_type,
         'currency_name', currency_name)), '[]'::json)
-     FROM event_rates WHERE event_id = %(event_id)s) AS event_rates
+     FROM event_rates WHERE event_id = %(event_id)s) AS event_rates,
+  (SELECT coalesce(json_agg(json_build_object(
+        'from_name', from_name, 'to_name', to_name, 'amount', amount,
+        'settled_time', settled_time, 'position', position) ORDER BY position), '[]'::json)
+     FROM settlements WHERE event_id = %(event_id)s) AS settlements
 '''
 
 

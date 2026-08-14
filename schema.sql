@@ -88,6 +88,20 @@ CREATE TABLE IF NOT EXISTS event_rates (
     PRIMARY KEY (event_id, currency_code)
 );
 
+-- Đánh dấu "đã chuyển tiền": mỗi dòng khớp ĐÚNG một giao dịch trong kết quả
+-- chia tiền theo (from_name, to_name, amount). Kết quả đổi (thêm/sửa chi phí)
+-- → hết khớp, coi như chưa đánh dấu; dòng cũ vô hại và tự dọn khi client
+-- toggle. PK tự nhiên khớp ngữ nghĩa "tối đa 1 đánh dấu / giao dịch".
+CREATE TABLE IF NOT EXISTS settlements (
+    event_id     uuid NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    from_name    text NOT NULL,
+    to_name      text NOT NULL,
+    amount       numeric NOT NULL,
+    settled_time text NOT NULL DEFAULT '',
+    position     int  NOT NULL,
+    PRIMARY KEY (event_id, from_name, to_name, amount)
+);
+
 -- Hồ sơ người dùng: username (duy nhất, lowercase) dùng thay email khi đăng
 -- nhập. Không FK sang auth.users (giống owner_id) để chạy được trên Postgres
 -- thường; user_id là id của Supabase Auth.
@@ -181,6 +195,7 @@ ALTER TABLE member_bank_info      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE couples               ENABLE ROW LEVEL SECURITY;
 ALTER TABLE couple_members        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE event_rates           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE settlements           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_profiles         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE event_revisions       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE event_collaborators   ENABLE ROW LEVEL SECURITY;

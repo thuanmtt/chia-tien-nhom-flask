@@ -28,13 +28,16 @@ FULL_DOC = {
     'couples': [{'id': 'c1', 'label': 'Vợ chồng An', 'members': ['An', 'Bình'], 'primary': 'An'}],
     'rates': {'USD': {'rate': 25000, 'source': 'test', 'rateDate': '2026-08-01',
                       'rateType': 'mid', 'currencyName': 'US Dollar'}},
+    'settlements': [
+        {'from': 'Chi', 'to': 'An', 'amount': 250000, 'settled_time': '2026-08-03T08:00:00Z'},
+    ],
 }
 
 
 def test_roundtrip_full():
     doc = validate_event_payload(FULL_DOC)
     out = rows_to_document(document_to_rows(doc))
-    for key in ('members', 'expenses', 'bankInfo', 'couples', 'rates'):
+    for key in ('members', 'expenses', 'bankInfo', 'couples', 'rates', 'settlements'):
         assert out[key] == doc[key], f'round-trip lệch ở {key}:\n{out[key]}\n!=\n{doc[key]}'
     print('✅ round-trip document đầy đủ')
 
@@ -44,7 +47,25 @@ def test_roundtrip_empty():
     out = rows_to_document(document_to_rows(doc))
     assert out['members'] == [] and out['expenses'] == []
     assert out['bankInfo'] == {} and out['couples'] == [] and out['rates'] == {}
+    assert out['settlements'] == []
     print('✅ round-trip document rỗng')
+
+
+def test_settlements_dedupe():
+    # Trùng (from, to, amount) phải bị khử trước khi INSERT — PK của bảng
+    doc = validate_event_payload({
+        'title': 'Trùng settle', 'members': [], 'expenses': [],
+        'settlements': [
+            {'from': 'A', 'to': 'B', 'amount': 100, 'settled_time': 't1'},
+            {'from': 'A', 'to': 'B', 'amount': 100, 'settled_time': 't2'},
+            {'from': 'A', 'to': 'B', 'amount': 200, 'settled_time': 't3'},
+        ],
+    })
+    rows = document_to_rows(doc)
+    assert [(r['from_name'], r['to_name'], r['amount']) for r in rows['settlements']] == [
+        ('A', 'B', 100), ('A', 'B', 200)]
+    assert [r['position'] for r in rows['settlements']] == [0, 1]
+    print('✅ khử trùng lặp settlements theo (from, to, amount)')
 
 
 def test_dedupe_names():
@@ -92,6 +113,7 @@ def test_positions_preserve_order():
 if __name__ == '__main__':
     test_roundtrip_full()
     test_roundtrip_empty()
+    test_settlements_dedupe()
     test_dedupe_names()
     test_positions_preserve_order()
     print('\n🎉 test_event_store: tất cả pass')

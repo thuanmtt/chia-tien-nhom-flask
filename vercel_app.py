@@ -41,8 +41,10 @@ app = Flask(
     template_folder=os.path.join(BASE_DIR, 'templates'),
     static_folder=os.path.join(BASE_DIR, 'static'),
 )
-# Chặn payload quá lớn (event bình thường chỉ vài chục KB)
-app.config['MAX_CONTENT_LENGTH'] = 512 * 1024
+# Chặn payload quá lớn (event bình thường chỉ vài chục KB). Cap phải đủ cho
+# event chạm trần validation (MAX_EXPENSES=2000 khoản, mỗi khoản vài trăm byte
+# JSON ≈ 1-1.5MB) — 512KB cũ khiến event lớn 413 vĩnh viễn, không lưu được nữa.
+app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024
 
 
 def _client_ip():
@@ -770,6 +772,7 @@ def get_event(event_code):
                 'bankInfo': doc['bankInfo'],
                 'couples': doc['couples'],
                 'rates': doc['rates'],
+                'settlements': doc['settlements'],
                 'created_at': acc.created_at.isoformat() if acc.created_at else None,
                 'updated_at': acc.updated_at.isoformat() if acc.updated_at else None,
             },
@@ -1126,6 +1129,71 @@ def list_event_revisions(event_code):
                 rev['actor_name'] = _mask_email(rev.get('actor_name'))
                 rev['summary'] = [_mask_emails_in_text(t) for t in rev.get('summary', [])]
         return jsonify({'success': True, 'revisions': revisions})
+    except HTTPException:
+        raise
+    except Exception as e:
+        return _server_error(e)
+
+
+@app.route('/api/events/<event_code>/revisions/<revision_id>')
+@limiter.limit('60 per minute')
+def get_event_revision(event_code, revision_id):
+    """Xem trước một phiên bản trong lịch sử: nội dung snapshot (rút gọn — KHÔNG
+    kèm bankInfo) + danh sách khác biệt so với BẢN HIỆN TẠI, tức chính những gì
+    "Khôi phục bản này" sẽ làm. Quyền y hệt xem lịch sử (đăng nhập + may_edit)."""
+    try:
+        claims = request_user_claims(request)
+        user_id = (claims or {}).get('sub')
+        if not user_id:
+            return jsonify({'success': False, 'error': 'Vui lòng đăng nhập để xem lịch sử.'}), 401
+        try:
+            uuid.UUID(str(revision_id))
+        except (ValueError, TypeError):
+            return jsonify({'success': False, 'error': 'Không tìm thấy phiên bản.'}), 404
+
+        conn = get_db_connection()
+        with conn.cursor() as cursor:
+            acc = _event_access(cursor, event_code, user_id)
+            if acc is None:
+                return jsonify({'success': False, 'error': 'Event not found'}), 404
+            if not acc.may_edit:
+                return jsonify({'success': False, 'error': 'Bạn không có quyền xem lịch sử sự kiện này.'}), 403
+            snapshot, created_at = get_revision(cursor, acc.event_id, str(revision_id))
+            if snapshot is None:
+                return jsonify({'success': False, 'error': 'Không tìm thấy phiên bản.'}), 404
+            current_doc = _load_full_document(conn, cursor, acc.event_id)
+
+        # Diff chiều hiện tại → snapshot để đọc là "khôi phục bản này sẽ: ...";
+        # cap 50 (cao hơn summary lịch sử) — preview cần đủ chi tiết.
+        changes = [a.get('t', '') for a in diff_documents(current_doc, snapshot, max_actions=50)]
+        # Cùng rule mask email như danh sách lịch sử: người không phải owner
+        # không thấy email đầy đủ lẫn trong text.
+        if not acc.is_owner:
+            changes = [_mask_emails_in_text(t) for t in changes]
+
+        expenses = snapshot.get('expenses') or []
+        preview = {
+            'title': snapshot.get('title') or '',
+            'members': snapshot.get('members') or [],
+            'expense_count': len(expenses),
+            # Đủ để nhận ra phiên bản; cap 100 khoản cho response nhẹ
+            'expenses': [
+                {
+                    'title': e.get('title') or '',
+                    'amount': e.get('amount'),
+                    'currency': e.get('currency') or 'VND',
+                    'payer': e.get('payer') or '',
+                    'expense_date': e.get('expense_date') or '',
+                }
+                for e in expenses[:100]
+            ],
+        }
+        return jsonify({'success': True, 'revision': {
+            'id': str(revision_id),
+            'created_at': created_at.isoformat() if created_at else None,
+            'preview': preview,
+            'changes': changes,
+        }})
     except HTTPException:
         raise
     except Exception as e:

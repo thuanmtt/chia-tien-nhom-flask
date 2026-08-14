@@ -58,8 +58,13 @@ def _couple_label(couple):
     return couple.get('label') or ', '.join(couple.get('members') or [])
 
 
-def diff_documents(old_doc, new_doc):
-    """So document cũ/mới (shape đã validate) → list hành động, cap MAX_ACTIONS."""
+def _settlement_key(s):
+    return f"settle:{s.get('from')}→{s.get('to')}:{s.get('amount')}"
+
+
+def diff_documents(old_doc, new_doc, max_actions=MAX_ACTIONS):
+    """So document cũ/mới (shape đã validate) → list hành động, cap max_actions
+    (mặc định MAX_ACTIONS cho summary lịch sử; preview phiên bản truyền cao hơn)."""
     actions = []
 
     if (old_doc.get('title') or '') != (new_doc.get('title') or ''):
@@ -130,8 +135,21 @@ def diff_documents(old_doc, new_doc):
         if code not in new_rates:
             actions.append({'a': 'remove', 'o': f'rate:{code}', 't': f'Xóa tỷ giá {code}'})
 
-    if len(actions) > MAX_ACTIONS:
-        extra = len(actions) - MAX_ACTIONS
-        actions = actions[:MAX_ACTIONS]
+    old_settle = {_settlement_key(s): s for s in (old_doc.get('settlements') or [])}
+    new_settle = {_settlement_key(s): s for s in (new_doc.get('settlements') or [])}
+    for key, s in new_settle.items():
+        if key not in old_settle:
+            actions.append({'a': 'add', 'o': key,
+                            't': f"Đánh dấu đã chuyển: '{s.get('from')}' → '{s.get('to')}'"
+                                 f" ({_fmt_money(s.get('amount'))})"})
+    for key, s in old_settle.items():
+        if key not in new_settle:
+            actions.append({'a': 'remove', 'o': key,
+                            't': f"Bỏ đánh dấu đã chuyển: '{s.get('from')}' → '{s.get('to')}'"
+                                 f" ({_fmt_money(s.get('amount'))})"})
+
+    if len(actions) > max_actions:
+        extra = len(actions) - max_actions
+        actions = actions[:max_actions]
         actions.append({'a': 'more', 'o': '', 't': f'… và {extra} thay đổi khác'})
     return actions

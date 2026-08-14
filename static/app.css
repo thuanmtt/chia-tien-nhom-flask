@@ -286,3 +286,19 @@
 #appLoadingPercent {
     font-variant-numeric: tabular-nums;
 }
+
+/* Giao dịch đã đánh dấu "đã chuyển tiền": gạch ngang + mờ câu mô tả */
+.transfer-item.settled .transfer-text {
+    text-decoration: line-through;
+    opacity: 0.6;
+}
+
+/* Panel xem trước phiên bản trong modal Lịch sử */
+.history-preview {
+    border-left: 3px solid #dbe0e8;
+    padding-left: 0.75rem;
+}
+.history-preview-expenses {
+    max-height: 220px;
+    overflow-y: auto;
+}
