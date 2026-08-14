@@ -191,3 +191,59 @@ ALTER TABLE deleted_events        ENABLE ROW LEVEL SECURITY;
 -- chế độ chia sẻ. Idempotent. LƯU Ý deploy: chỉ chạy schema.sql lên DB đang
 -- phục vụ production SAU khi code mới (không còn đọc edit_key) đã deploy.
 ALTER TABLE events DROP COLUMN IF EXISTS edit_key;
+
+-- View tra cứu tay events_with_owner: events kèm email chủ (join auth.users),
+-- số thành viên, số khoản chi, tổng chi phí quy VND và link mở nhanh.
+-- Chỉ tạo khi có auth.users (Supabase) — Postgres thường khi dev/test bỏ qua.
+-- App KHÔNG dùng view này; chỉ để query tay khi cần theo dõi.
+DO $$
+BEGIN
+    IF to_regclass('auth.users') IS NULL THEN
+        RETURN;
+    END IF;
+    EXECUTE $view$
+        CREATE OR REPLACE VIEW events_with_owner AS
+        SELECT
+            e.event_code,
+            e.title,
+            u.email                 AS owner_email,
+            COALESCE(m.member_count, 0)  AS member_count,
+            COALESCE(x.expense_count, 0) AS expense_count,
+            x.total_amount_vnd,
+            COALESCE(x.missing_rate_expenses, 0) AS missing_rate_expenses,
+            'https://chia-tien-nhom.vercel.app/?event_code=' || e.event_code
+                                    AS event_url,
+            e.share_access,
+            e.share_role,
+            e.owner_id,
+            e.id,
+            e.created_at,
+            e.updated_at
+        FROM events e
+        LEFT JOIN auth.users u ON u.id = e.owner_id
+        LEFT JOIN (
+            SELECT event_id, count(*) AS member_count
+            FROM members GROUP BY event_id
+        ) m ON m.event_id = e.id
+        LEFT JOIN (
+            SELECT
+                x.event_id,
+                count(*) AS expense_count,
+                -- Tổng quy về VND theo event_rates; có khoản ngoại tệ thiếu
+                -- tỷ giá thì NULL (giống amountInVND client) thay vì cộng thiếu.
+                CASE WHEN bool_or(x.currency <> 'VND' AND r.rate IS NULL)
+                     THEN NULL
+                     ELSE round(sum(x.amount * COALESCE(r.rate, 1)))
+                END AS total_amount_vnd,
+                count(*) FILTER (WHERE x.currency <> 'VND' AND r.rate IS NULL)
+                    AS missing_rate_expenses
+            FROM expenses x
+            LEFT JOIN event_rates r
+                ON r.event_id = x.event_id AND r.currency_code = x.currency
+            GROUP BY x.event_id
+        ) x ON x.event_id = e.id
+    $view$;
+    -- View chạy bằng quyền owner (postgres) nên vượt RLS bảng gốc — phải revoke
+    -- để PostgREST không phơi email/số liệu ra API công khai với anon key.
+    EXECUTE 'REVOKE ALL ON events_with_owner FROM anon, authenticated';
+END $$;
