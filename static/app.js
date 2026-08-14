@@ -612,6 +612,14 @@
                 window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
         }
 
+        // Tên mặc định cho sự kiện mới: "Sự kiện ngày DD/MM/YYYY" theo ngày hiện tại
+        function defaultEventTitle() {
+            const now = new Date();
+            const dd = String(now.getDate()).padStart(2, '0');
+            const mm = String(now.getMonth() + 1).padStart(2, '0');
+            return 'Sự kiện ngày ' + dd + '/' + mm + '/' + now.getFullYear();
+        }
+
         // Hàm tạo sự kiện mới
         function createNewEvent() {
             localStorage.removeItem('currentEventCode');
@@ -626,7 +634,7 @@
             isSavedEvent = false;
             updateFollowButton(); // currentEventCode=null → ẩn nút
             setSaveStatus('');
-            $('#eventTitle').text('Sự Kiện Mới');
+            $('#eventTitle').text(defaultEventTitle());
             $('#eventCodeDisplay').text('');
             members = [];
             expenses = [];
@@ -2837,7 +2845,7 @@
                 saveEvent(false);
             } else {
                 showToast('Vui lòng nhập tên sự kiện!', 'warning');
-                $(this).text('Sự Kiện Mới'); // Đặt lại tên mặc định nếu người dùng xóa hết
+                $(this).text(defaultEventTitle()); // Đặt lại tên mặc định nếu người dùng xóa hết
             }
         });
 
