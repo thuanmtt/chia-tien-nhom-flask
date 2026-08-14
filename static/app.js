@@ -1928,14 +1928,14 @@
                 const owned = !!(ownedByCode && ownedByCode[event.event_code]);
                 // Icon nhận biết event do mình tạo (HTML tĩnh, không dữ liệu user)
                 const ownerBadge = owned
-                    ? '<i class="fas fa-crown text-warning me-1" title="Sự kiện của bạn"></i>'
+                    ? '<i class="fas fa-user-shield text-primary me-1" title="Sự kiện của bạn"></i>'
                     : '';
                 const actionBtn = owned
                     ? `<button class="btn btn-sm btn-danger delete-event-btn" data-event-code="${safeCode}" title="Xóa sự kiện">
                             <i class="fas fa-trash"></i>
                        </button>`
-                    : `<button class="btn btn-sm btn-outline-secondary unsave-event-btn" data-event-code="${safeCode}" title="Gỡ khỏi danh sách">
-                            <i class="fas fa-times"></i>
+                    : `<button class="btn btn-sm btn-outline-secondary unsave-event-btn" data-event-code="${safeCode}" title="Bỏ theo dõi">
+                            <i class="fas fa-bell-slash"></i>
                        </button>`;
 
                 $('#savedEventsList').append(`
